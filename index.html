@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>文件管理系統</title>
+<style>
+  :root {
+    --primary: #1a3a5c;
+    --primary-light: #2d5a8c;
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --border: #dde2e8;
+    --text: #1f2937;
+    --text-muted: #6b7280;
+    --radius: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    background: var(--bg); color: var(--text); font-size: 14px;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--primary); color: #fff;
+    padding: 14px 24px; display: flex; align-items: center; justify-content: space-between;
+  }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header .actions button {
+    background: #fff; color: var(--primary); border: none;
+    padding: 8px 16px; border-radius: var(--radius); font-size: 14px;
+    cursor: pointer; font-weight: 600;
+  }
+  header .actions button:hover { background: #e8eef5; }
+
+  /* ── Layout ── */
+  .container { display: flex; gap: 16px; padding: 16px 24px; max-width: 1400px; margin: 0 auto; }
+  .panel-list { flex: 1.4; min-width: 0; }
+  .panel-detail { flex: 1; min-width: 320px; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden;
+  }
+  .card-header {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    font-weight: 600; display: flex; align-items: center; justify-content: space-between;
+  }
+  .card-body { padding: 16px; }
+
+  /* ── 搜尋列 ── */
+  .toolbar { display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .toolbar input[type="search"] {
+    flex: 1; min-width: 160px; padding: 8px 12px;
+    border: 1px solid var(--border); border-radius: var(--radius); font-size: 14px;
+  }
+  .toolbar select {
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius);
+    font-size: 14px; background: #fff;
+  }
+
+  /* ── 文件表格 ── */
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left; padding: 10px 12px; font-size: 12px; color: var(--text-muted);
+    border-bottom: 2px solid var(--border); background: #fafbfc; font-weight: 600;
+  }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tbody tr { cursor: pointer; transition: background .12s; }
+  tbody tr:hover { background: #f0f4f8; }
+  tbody tr.active { background: #e3edf7; }
+
+  .badge {
+    display: inline-block; padding: 3px 10px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; white-space: nowrap;
+  }
+  .badge-草稿   { background: #fef3c7; color: #92400e; }
+  .badge-審核中 { background: #dbeafe; color: #1e40af; }
+  .badge-已發布 { background: #d1fae5; color: #065f46; }
+  .badge-已廢止 { background: #f3f4f6; color: #6b7280; }
+
+  .doc-id { font-family: "SF Mono", Consolas, monospace; font-size: 12px; color: var(--text-muted); }
+
+  /* ── 詳細面板 ── */
+  .detail-empty { padding: 48px 16px; text-align: center; color: var(--text-muted); }
+  .detail-title { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+  .detail-meta { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 14px 0; font-size: 13px; }
+  .detail-meta dt { color: var(--text-muted); }
+  .detail-meta dd { word-break: break-all; }
+  .detail-meta a { color: var(--primary-light); }
+
+  .section-title {
+    font-size: 13px; font-weight: 700; color: var(--text-muted);
+    margin: 18px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .section-title button {
+    font-size: 12px; padding: 3px 10px; border: 1px solid var(--border);
+    background: #fff; border-radius: var(--radius); cursor: pointer; font-weight: 400;
+  }
+  .section-title button:hover { background: #f0f4f8; }
+
+  .rel-item {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 6px;
+    background: #fafbfc;
+  }
+  .rel-item .depth-tag {
+    flex-shrink: 0; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600;
+  }
+  .depth-1 { background: #dbeafe; color: #1e40af; }
+  .depth-n { background: #ede9fe; color: #5b21b6; }
+  .rel-item .rel-info { flex: 1; min-width: 0; }
+  .rel-item .rel-title { font-weight: 600; font-size: 13px; }
+  .rel-item .rel-sub { font-size: 12px; color: var(--text-muted); }
+  .rel-item .btn-del {
+    flex-shrink: 0; border: none; background: none; color: #dc2626;
+    cursor: pointer; font-size: 13px; padding: 4px;
+  }
+  .rel-item .btn-del:hover { text-decoration: underline; }
+
+  .detail-actions { display: flex; gap: 8px; margin-top: 16px; }
+  .detail-actions button {
+    flex: 1; padding: 9px; border-radius: var(--radius); font-size: 14px;
+    cursor: pointer; font-weight: 600; border: 1px solid var(--border); background: #fff;
+  }
+  .detail-actions .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .detail-actions .btn-danger { color: #dc2626; border-color: #fca5a5; }
+
+  /* ── Modal ── */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45);
+    display: none; align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal-backdrop.show { display: flex; }
+  .modal {
+    background: #fff; border-radius: 12px; width: min(480px, 92vw);
+    max-height: 86vh; display: flex; flex-direction: column;
+  }
+  .modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 16px; }
+  .modal-body { padding: 16px 20px; overflow-y: auto; max-height: 70vh; }
+  .modal-footer {
+    padding: 12px 20px; border-top: 1px solid var(--border);
+    display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0;
+  }
+  .modal-footer button {
+    padding: 8px 18px; border-radius: var(--radius); font-size: 14px; cursor: pointer;
+    border: 1px solid var(--border); background: #fff;
+  }
+  .modal-footer .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+  .form-group { margin-bottom: 12px; }
+  .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+  .form-group input, .form-group select, .form-group textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: var(--radius); font-size: 14px; font-family: inherit;
+  }
+  .form-group textarea { resize: vertical; min-height: 60px; }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--text); color: #fff; padding: 10px 22px; border-radius: 999px;
+    font-size: 14px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 200;
+  }
+  #toast.show { opacity: 1; }
+
+  /* ── Loading ── */
+  #loading {
+    position: fixed; inset: 0; background: rgba(255,255,255,.7);
+    display: flex; align-items: center; justify-content: center; z-index: 150;
+    font-size: 15px; color: var(--text-muted);
+  }
+  #loading.hide { display: none; }
+
+  @media (max-width: 900px) {
+    .container { flex-direction: column; }
+    .panel-detail { min-width: 0; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📁 文件管理系統</h1>
+  <div class="actions">
+    <button onclick="openDocModal()">＋ 新增文件</button>
+  </div>
+</header>
+
+<div class="container">
+  <!-- 左側：文件清單 -->
+  <div class="panel-list">
+    <div class="card">
+      <div class="toolbar">
+        <input type="search" id="searchInput" placeholder="搜尋文件編號、標題、負責人…">
+        <select id="filterCategory"><option value="">全部類別</option></select>
+        <select id="filterStatus"><option value="">全部狀態</option></select>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>文件編號</th><th>標題</th><th>類別</th><th>狀態</th><th>負責人</th><th>版本</th>
+          </tr>
+        </thead>
+        <tbody id="docTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 右側：詳細面板 -->
+  <div class="panel-detail">
+    <div class="card">
+      <div class="card-header">文件詳細</div>
+      <div class="card-body" id="detailPanel">
+        <div class="detail-empty">點選左側文件查看詳細資訊與關聯</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 新增/編輯文件 Modal -->
+<div class="modal-backdrop" id="docModal">
+  <div class="modal">
+    <div class="modal-header" id="docModalTitle">新增文件</div>
+    <div class="modal-body">
+      <input type="hidden" id="f_doc_id">
+      <div class="form-group"><label>標題 *</label><input id="f_title" required></div>
+      <div class="form-group"><label>類別</label><select id="f_category"></select></div>
+      <div class="form-group"><label>狀態</label><select id="f_status"></select></div>
+      <div class="form-group"><label>負責人</label><input id="f_owner"></div>
+      <div class="form-group"><label>負責人 ID</label><input id="f_owner_id"></div>
+      <div class="form-group"><label>版本</label><input id="f_version" placeholder="例：1.0"></div>
+      <div class="form-group"><label>Google Drive 位置</label><input id="f_drive_loc" placeholder="https://drive.google.com/..."></div>
+    </div>
+    <div class="modal-footer">
+      <button onclick="closeModal('docModal')">取消</button>
+      <button class="btn-primary" onclick="saveDoc()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 新增關聯 Modal -->
+<div class="modal-backdrop" id="relModal">
+  <div class="modal">
+    <div class="modal-header">新增關聯</div>
+    <div class="modal-body">
+      <div class="form-group"><label>來源文件</label><input id="r_ancestor" disabled></div>
+      <div class="form-group"><label>關聯到（目標文件）*</label><select id="r_descendant"></select></div>
+      <div class="form-group"><label>關聯類型</label><select id="r_type"></select></div>
+      <div class="form-group"><label>說明</label><textarea id="r_desc" placeholder="選填，例如：政策總綱引用此程序書"></textarea></div>
+    </div>
+    <div class="modal-footer">
+      <button onclick="closeModal('relModal')">取消</button>
+      <button class="btn-primary" onclick="saveRelation()">建立關聯</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="loading">載入中…</div>
+
+<script>
+// ============================================================
+// 全域狀態
+// ============================================================
+let allDocs = [];
+let statuses = [];
+let categories = [];
+let relationTypes = [];
+let selectedDocId = null;
+
+// ── 工具 ──────────────────────────────────────────────────
+function escapeHtml(str) {
+  return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+function showLoading(on) {
+  document.getElementById('loading').classList.toggle('hide', !on);
+}
+function closeModal(id) {
+  document.getElementById(id).classList.remove('show');
+}
+function statusBadge(s) {
+  return `<span class="badge badge-${escapeHtml(s)}">${escapeHtml(s)}</span>`;
+}
+
+// ============================================================
+// 初始化
+// ============================================================
+window.addEventListener('DOMContentLoaded', () => {
+  google.script.run
+    .withSuccessHandler(data => {
+      allDocs = data.docs;
+      statuses = data.statuses;
+      categories = data.categories;
+      relationTypes = data.relationTypes;
+      initFilters();
+      renderTable();
+      showLoading(false);
+    })
+    .withFailureHandler(err => {
+      showLoading(false);
+      showToast('載入失敗：' + err.message);
+    })
+    .apiGetInitData();
+
+  document.getElementById('searchInput').addEventListener('input', debounce(renderTable, 180));
+  document.getElementById('filterCategory').addEventListener('change', renderTable);
+  document.getElementById('filterStatus').addEventListener('change', renderTable);
+});
+
+function debounce(fn, ms) {
+  let t;
+  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+function initFilters() {
+  const catSel = document.getElementById('filterCategory');
+  categories.forEach(c => {
+    const o = document.createElement('option');
+    o.value = c; o.textContent = c;
+    catSel.appendChild(o);
+  });
+  const stSel = document.getElementById('filterStatus');
+  statuses.forEach(s => {
+    const o = document.createElement('option');
+    o.value = s; o.textContent = s;
+    stSel.appendChild(o);
+  });
+}
+
+// ============================================================
+// 文件清單渲染
+// ============================================================
+function renderTable() {
+  const kw = document.getElementById('searchInput').value.trim().toLowerCase();
+  const cat = document.getElementById('filterCategory').value;
+  const st = document.getElementById('filterStatus').value;
+
+  const filtered = allDocs.filter(d => {
+    if (cat && d.category !== cat) return false;
+    if (st && d.status !== st) return false;
+    if (kw) {
+      const hay = `${d.doc_id} ${d.title} ${d.owner}`.toLowerCase();
+      if (!hay.includes(kw)) return false;
+    }
+    return true;
+  });
+
+  const tbody = document.getElementById('docTableBody');
+  tbody.innerHTML = '';
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#6b7280;padding:32px">沒有符合條件的文件</td></tr>';
+    return;
+  }
+
+  filtered.forEach(d => {
+    const tr = document.createElement('tr');
+    if (d.doc_id === selectedDocId) tr.classList.add('active');
+    tr.innerHTML = `
+      <td class="doc-id">${escapeHtml(d.doc_id)}</td>
+      <td>${escapeHtml(d.title)}</td>
+      <td>${escapeHtml(d.category)}</td>
+      <td>${statusBadge(d.status)}</td>
+      <td>${escapeHtml(d.owner)}</td>
+      <td>${escapeHtml(d.version)}</td>`;
+    tr.addEventListener('click', () => selectDoc(d.doc_id));
+    tbody.appendChild(tr);
+  });
+}
+
+// ============================================================
+// 詳細面板
+// ============================================================
+function selectDoc(docId) {
+  selectedDocId = docId;
+  renderTable(); // 更新 active 樣式
+  renderDetailSkeleton(docId);
+
+  // 平行載入：關聯（向下）+ 反查（向上）
+  google.script.run
+    .withSuccessHandler(desc => {
+      google.script.run
+        .withSuccessHandler(anc => renderDetail(docId, desc, anc))
+        .withFailureHandler(err => showToast('反查失敗：' + err.message))
+        .apiGetAncestors(docId);
+    })
+    .withFailureHandler(err => showToast('關聯載入失敗：' + err.message))
+    .apiGetDescendants(docId, 99);
+}
+
+function renderDetailSkeleton(docId) {
+  const doc = allDocs.find(d => d.doc_id === docId);
+  if (!doc) return;
+  document.getElementById('detailPanel').innerHTML = `
+    <div class="detail-title">${escapeHtml(doc.title)}</div>
+    <div class="doc-id">${escapeHtml(doc.doc_id)}</div>
+    <div style="color:#6b7280;padding:16px 0">關聯資料載入中…</div>`;
+}
+
+function renderDetail(docId, descendants, ancestors) {
+  const doc = allDocs.find(d => d.doc_id === docId);
+  if (!doc) return;
+
+  const driveLink = doc.drive_loc
+    ? `<a href="${escapeHtml(doc.drive_loc)}" target="_blank" rel="noopener">開啟連結 ↗</a>`
+    : '<span style="color:#9ca3af">未設定</span>';
+
+  const descHtml = descendants.length === 0
+    ? '<div style="color:#9ca3af;font-size:13px;padding:6px 0">無關聯文件</div>'
+    : descendants.map(r => `
+      <div class="rel-item">
+        <span class="depth-tag ${r.depth === 1 ? 'depth-1' : 'depth-n'}">
+          ${r.depth === 1 ? '直接' : '間接 d' + r.depth}
+        </span>
+        <div class="rel-info">
+          <div class="rel-title">${escapeHtml(r.doc_id)}｜${escapeHtml(r.title)}</div>
+          <div class="rel-sub">${statusBadge(r.status)} ${escapeHtml(r.relation_type)}</div>
+        </div>
+        ${r.depth === 1 ? `<button class="btn-del" onclick="removeRelation('${escapeHtml(docId)}','${escapeHtml(r.doc_id)}')">移除</button>` : ''}
+      </div>`).join('');
+
+  const ancHtml = ancestors.length === 0
+    ? '<div style="color:#9ca3af;font-size:13px;padding:6px 0">沒有文件關聯到此文件</div>'
+    : ancestors.map(r => `
+      <div class="rel-item">
+        <span class="depth-tag ${r.depth === 1 ? 'depth-1' : 'depth-n'}">
+          ${r.depth === 1 ? '直接' : '間接 d' + r.depth}
+        </span>
+        <div class="rel-info">
+          <div class="rel-title">${escapeHtml(r.doc_id)}｜${escapeHtml(r.title)}</div>
+          <div class="rel-sub">${statusBadge(r.status)}</div>
+        </div>
+      </div>`).join('');
+
+  document.getElementById('detailPanel').innerHTML = `
+    <div class="detail-title">${escapeHtml(doc.title)}</div>
+    <div class="doc-id">${escapeHtml(doc.doc_id)}</div>
+
+    <dl class="detail-meta">
+      <dt>類別</dt><dd>${escapeHtml(doc.category)}</dd>
+      <dt>狀態</dt><dd>${statusBadge(doc.status)}</dd>
+      <dt>負責人</dt><dd>${escapeHtml(doc.owner)}（${escapeHtml(doc.owner_id)}）</dd>
+      <dt>版本</dt><dd>${escapeHtml(doc.version)}</dd>
+      <dt>更新日期</dt><dd>${escapeHtml(doc.updated_at)}</dd>
+      <dt>Drive</dt><dd>${driveLink}</dd>
+    </dl>
+
+    <div class="section-title">
+      <span>📎 此文件引用（向下關聯）</span>
+      <button onclick="openRelModal('${escapeHtml(docId)}')">＋ 新增關聯</button>
+    </div>
+    ${descHtml}
+
+    <div class="section-title"><span>🔗 被誰引用（向上反查）</span></div>
+    ${ancHtml}
+
+    <div class="detail-actions">
+      <button class="btn-primary" onclick="openDocModal('${escapeHtml(docId)}')">編輯文件</button>
+      <button class="btn-danger" onclick="deleteDoc('${escapeHtml(docId)}')">刪除文件</button>
+    </div>`;
+}
+
+// ============================================================
+// 文件 CRUD
+// ============================================================
+function openDocModal(docId) {
+  const isEdit = !!docId;
+  document.getElementById('docModalTitle').textContent = isEdit ? '編輯文件' : '新增文件';
+  document.getElementById('f_doc_id').value = docId || '';
+
+  // 填充下拉選項
+  const catSel = document.getElementById('f_category');
+  catSel.innerHTML = categories.map(c => `<option>${escapeHtml(c)}</option>`).join('');
+  const stSel = document.getElementById('f_status');
+  stSel.innerHTML = statuses.map(s => `<option>${escapeHtml(s)}</option>`).join('');
+
+  if (isEdit) {
+    const doc = allDocs.find(d => d.doc_id === docId);
+    document.getElementById('f_title').value = doc.title;
+    catSel.value = doc.category;
+    stSel.value = doc.status;
+    document.getElementById('f_owner').value = doc.owner;
+    document.getElementById('f_owner_id').value = doc.owner_id;
+    document.getElementById('f_version').value = doc.version;
+    document.getElementById('f_drive_loc').value = doc.drive_loc;
+  } else {
+    document.getElementById('f_title').value = '';
+    document.getElementById('f_owner').value = '';
+    document.getElementById('f_owner_id').value = '';
+    document.getElementById('f_version').value = '0.1';
+    document.getElementById('f_drive_loc').value = '';
+    stSel.value = '草稿';
+  }
+
+  document.getElementById('docModal').classList.add('show');
+}
+
+function saveDoc() {
+  const docId = document.getElementById('f_doc_id').value;
+  const payload = {
+    doc_id: docId,
+    title: document.getElementById('f_title').value.trim(),
+    category: document.getElementById('f_category').value,
+    status: document.getElementById('f_status').value,
+    owner: document.getElementById('f_owner').value.trim(),
+    owner_id: document.getElementById('f_owner_id').value.trim(),
+    version: document.getElementById('f_version').value.trim(),
+    drive_loc: document.getElementById('f_drive_loc').value.trim(),
+  };
+  if (!payload.title) { showToast('請輸入標題'); return; }
+
+  showLoading(true);
+  const apiName = docId ? 'apiUpdateDoc' : 'apiCreateDoc';
+
+  google.script.run
+    .withSuccessHandler(res => {
+      showLoading(false);
+      if (!res.success) { showToast('儲存失敗：' + res.error); return; }
+      closeModal('docModal');
+      showToast(docId ? '已更新' : '已新增：' + res.doc_id);
+      reloadDocs(docId || res.doc_id);
+    })
+    .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
+    [apiName](payload);
+}
+
+function deleteDoc(docId) {
+  if (!confirm(`確定刪除 ${docId}？\n此操作會同步刪除所有相關的關聯記錄。`)) return;
+  showLoading(true);
+  google.script.run
+    .withSuccessHandler(res => {
+      showLoading(false);
+      if (!res.success) { showToast('刪除失敗：' + res.error); return; }
+      selectedDocId = null;
+      document.getElementById('detailPanel').innerHTML =
+        '<div class="detail-empty">點選左側文件查看詳細資訊與關聯</div>';
+      showToast('已刪除');
+      reloadDocs();
+    })
+    .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
+    .apiDeleteDoc(docId);
+}
+
+function reloadDocs(selectAfter) {
+  google.script.run
+    .withSuccessHandler(data => {
+      allDocs = data.docs;
+      renderTable();
+      if (selectAfter) selectDoc(selectAfter);
+    })
+    .apiGetInitData();
+}
+
+// ============================================================
+// 關聯操作
+// ============================================================
+function openRelModal(ancestorId) {
+  document.getElementById('r_ancestor').value = ancestorId;
+
+  // 目標選項：排除自己
+  const sel = document.getElementById('r_descendant');
+  sel.innerHTML = allDocs
+    .filter(d => d.doc_id !== ancestorId)
+    .map(d => `<option value="${escapeHtml(d.doc_id)}">${escapeHtml(d.doc_id)}｜${escapeHtml(d.title)}</option>`)
+    .join('');
+
+  const typeSel = document.getElementById('r_type');
+  typeSel.innerHTML = relationTypes.map(t => `<option>${escapeHtml(t)}</option>`).join('');
+
+  document.getElementById('r_desc').value = '';
+  document.getElementById('relModal').classList.add('show');
+}
+
+function saveRelation() {
+  const ancestor = document.getElementById('r_ancestor').value;
+  const descendant = document.getElementById('r_descendant').value;
+  const type = document.getElementById('r_type').value;
+  const desc = document.getElementById('r_desc').value.trim();
+
+  if (!descendant) { showToast('請選擇目標文件'); return; }
+
+  showLoading(true);
+  google.script.run
+    .withSuccessHandler(res => {
+      showLoading(false);
+      if (!res.success) { showToast(res.error); return; }
+      closeModal('relModal');
+      showToast(`已建立關聯（共寫入 ${res.added} 條路徑）`);
+      selectDoc(ancestor); // 重新載入詳細面板
+    })
+    .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
+    .apiAddRelation(ancestor, descendant, type, desc);
+}
+
+function removeRelation(ancestorId, descendantId) {
+  if (!confirm(`確定移除 ${ancestorId} → ${descendantId} 的關聯？\n相關的間接路徑會自動重算。`)) return;
+  showLoading(true);
+  google.script.run
+    .withSuccessHandler(res => {
+      showLoading(false);
+      if (!res.success) { showToast('移除失敗：' + res.error); return; }
+      showToast('已移除關聯');
+      selectDoc(ancestorId);
+    })
+    .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
+    .apiRemoveRelation(ancestorId, descendantId);
+}
+
+// Modal 背景點擊關閉
+document.querySelectorAll('.modal-backdrop').forEach(m => {
+  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('show'); });
+});
+</script>
+</body>
+</html>
