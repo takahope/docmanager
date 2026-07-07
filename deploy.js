@@ -1,6 +1,7 @@
 // ============================================================
-// deploy.js — 工作表初始化
-// 在 GAS 編輯器手動執行 deployAllSheets() 以建立工作表與 Header
+// deploy.js — 工作表初始化與版本遷移
+// 全新部署：在 GAS 編輯器手動執行 deployAllSheets()
+// 既有資料升級：執行 migrateV2()（冪等，可重複執行）
 // ============================================================
 
 function deployAllSheets() {
@@ -8,9 +9,44 @@ function deployAllSheets() {
 
   _deployDocSheet(ss);
   _deployClosureSheet(ss);
+  _deployAuditSheet(ss);
 
   SpreadsheetApp.flush();
   Logger.log('✅ 所有工作表初始化完成');
+}
+
+// ── V1 → V2 遷移：補文件清單 J–M 欄與異動紀錄表 ──────────────
+// 冪等設計：表頭已存在就跳過，不動既有資料列。
+function migrateV2() {
+  const ss = SpreadsheetApp.openById(ENV.SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_NAMES.DOCS);
+  if (!sheet) throw new Error(`找不到工作表：${SHEET_NAMES.DOCS}，請先執行 deployAllSheets()`);
+
+  const newHeaders = [
+    { col: DOC_COL.OWNER_EMAIL + 1,  name: 'owner_email' },
+    { col: DOC_COL.PUBLISHED_AT + 1, name: 'published_at' },
+    { col: DOC_COL.NEXT_REVIEW + 1,  name: 'next_review_date' },
+    { col: DOC_COL.REVIEW_CYCLE + 1, name: 'review_cycle_months' },
+  ];
+
+  newHeaders.forEach(h => {
+    const cell = sheet.getRange(1, h.col);
+    if (cell.getValue() === h.name) {
+      Logger.log(`欄位已存在，跳過：${h.name}`);
+      return;
+    }
+    cell.setValue(h.name)
+        .setFontWeight('bold')
+        .setBackground('#1a3a5c')
+        .setFontColor('#ffffff');
+    Logger.log(`✅ 補上欄位：${h.name}（第 ${h.col} 欄）`);
+  });
+
+  _applyDocSheetV2Formats(sheet);
+  _deployAuditSheet(ss);
+
+  SpreadsheetApp.flush();
+  Logger.log('✅ migrateV2 完成');
 }
 
 // ── 建立「文件清單」工作表 ─────────────────────────────────────
@@ -23,7 +59,8 @@ function _deployDocSheet(ss) {
 
   const headers = [
     'doc_id', 'title', 'category', 'status',
-    'owner', 'owner_ID', 'updated_at', 'version', 'google_drive_location'
+    'owner', 'owner_ID', 'updated_at', 'version', 'google_drive_location',
+    'owner_email', 'published_at', 'next_review_date', 'review_cycle_months'
   ];
 
   // 寫入 Header（第一列）
@@ -39,7 +76,7 @@ function _deployDocSheet(ss) {
   sheet.getRange('F:F').setNumberFormat('@'); // owner_ID 也強制文字
 
   // 欄寬設定
-  const colWidths = [120, 240, 100, 80, 100, 120, 120, 80, 280];
+  const colWidths = [120, 240, 100, 80, 100, 120, 120, 80, 280, 200, 110, 130, 90];
   colWidths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
 
   // 資料驗證：status 下拉
@@ -75,7 +112,23 @@ function _deployDocSheet(ss) {
     sheet.setConditionalFormatRules(rules);
   });
 
+  _applyDocSheetV2Formats(sheet);
+
   Logger.log(`✅ ${SHEET_NAMES.DOCS} 初始化完成`);
+}
+
+// V2 新欄位的格式與驗證（deployAllSheets 與 migrateV2 共用）
+function _applyDocSheetV2Formats(sheet) {
+  // owner_email、日期欄強制文字，避免日期被序列化成 Date 物件
+  sheet.getRange('J:J').setNumberFormat('@');
+  sheet.getRange('K:L').setNumberFormat('@');
+
+  // 資料驗證：review_cycle_months 下拉
+  const cycleRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(REVIEW_CYCLES.map(String), true)
+    .setAllowInvalid(true) // 允許空值（未發布文件可不填）
+    .build();
+  sheet.getRange('M2:M1000').setDataValidation(cycleRule);
 }
 
 // ── 建立「文件關聯」工作表 ─────────────────────────────────────
@@ -113,6 +166,36 @@ function _deployClosureSheet(ss) {
   Logger.log(`✅ ${SHEET_NAMES.CLOSURE} 初始化完成`);
 }
 
+// ── 建立「異動紀錄」工作表（版本歷史與操作稽核合一）────────────
+function _deployAuditSheet(ss) {
+  let sheet = ss.getSheetByName(SHEET_NAMES.AUDIT);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_NAMES.AUDIT);
+    Logger.log(`建立工作表：${SHEET_NAMES.AUDIT}`);
+  } else if (sheet.getRange(1, 1).getValue() === '時間') {
+    Logger.log(`${SHEET_NAMES.AUDIT} 已初始化，跳過`);
+    return;
+  }
+
+  const headers = ['時間', '操作者', '動作', 'doc_id', '版本', '變更摘要'];
+
+  const headerRange = sheet.getRange(1, 1, 1, headers.length);
+  headerRange.setValues([headers]);
+  headerRange.setFontWeight('bold');
+  headerRange.setBackground('#5c1a1a');
+  headerRange.setFontColor('#ffffff');
+  sheet.setFrozenRows(1);
+
+  // 時間與 doc_id 強制文字，避免 Date 序列化問題
+  sheet.getRange('A:A').setNumberFormat('@');
+  sheet.getRange('D:D').setNumberFormat('@');
+
+  const colWidths = [150, 200, 100, 120, 80, 360];
+  colWidths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
+
+  Logger.log(`✅ ${SHEET_NAMES.AUDIT} 初始化完成`);
+}
+
 // ── 寫入測試資料（選用）──────────────────────────────────────
 function seedSampleData() {
   const ss = SpreadsheetApp.openById(ENV.SPREADSHEET_ID);
@@ -120,15 +203,19 @@ function seedSampleData() {
   const clsSheet = ss.getSheetByName(SHEET_NAMES.CLOSURE);
 
   const today = Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy/MM/dd');
+  // 範例的下次審查日：發布日 + 12 個月
+  const nextYear = Utilities.formatDate(
+    new Date(new Date().setFullYear(new Date().getFullYear() + 1)),
+    'Asia/Taipei', 'yyyy/MM/dd');
 
   const docs = [
-    ['DOC-001', '資訊安全政策總綱', 'ISMS', '已發布', '王小明', 'U001', today, '1.0', ''],
-    ['DOC-002', '存取控制程序書',   'ISMS', '已發布', '李大華', 'U002', today, '2.1', ''],
-    ['DOC-003', '事件回應程序書',   'ISMS', '審核中', '陳美玲', 'U003', today, '1.3', ''],
-    ['DOC-004', '稽核作業程序書',   'ISMS', '草稿',   '王小明', 'U001', today, '0.2', ''],
-    ['DOC-005', '帳號申請表單',     '表單', '已發布', '李大華', 'U002', today, '1.0', ''],
-    ['DOC-006', '權限異動紀錄表',   '表單', '已發布', '李大華', 'U002', today, '1.0', ''],
-    ['DOC-007', '帳號停用申請單',   '表單', '草稿',   '陳美玲', 'U003', today, '0.1', ''],
+    ['DOC-001', '資訊安全政策總綱', 'ISMS', '已發布', '王小明', 'U001', today, '1.0', '', 'ming@example.com',  today, nextYear, 12],
+    ['DOC-002', '存取控制程序書',   'ISMS', '已發布', '李大華', 'U002', today, '2.1', '', 'hua@example.com',   today, nextYear, 12],
+    ['DOC-003', '事件回應程序書',   'ISMS', '審核中', '陳美玲', 'U003', today, '1.3', '', 'mei@example.com',   '', '', 12],
+    ['DOC-004', '稽核作業程序書',   'ISMS', '草稿',   '王小明', 'U001', today, '0.2', '', 'ming@example.com',  '', '', 12],
+    ['DOC-005', '帳號申請表單',     '表單', '已發布', '李大華', 'U002', today, '1.0', '', 'hua@example.com',   today, nextYear, 12],
+    ['DOC-006', '權限異動紀錄表',   '表單', '已發布', '李大華', 'U002', today, '1.0', '', 'hua@example.com',   today, nextYear, 12],
+    ['DOC-007', '帳號停用申請單',   '表單', '草稿',   '陳美玲', 'U003', today, '0.1', '', 'mei@example.com',   '', '', 12],
   ];
 
   docSheet.getRange(2, 1, docs.length, docs[0].length).setValues(docs);

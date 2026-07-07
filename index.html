@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>文件管理系統</title>
+<title>文件管理</title>
 <style>
   :root {
     --primary: #1a3a5c;
@@ -13,6 +13,7 @@
     --border: #dde2e8;
     --text: #1f2937;
     --text-muted: #6b7280;
+    --danger: #dc2626;
     --radius: 8px;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -24,15 +25,40 @@
   /* ── Header ── */
   header {
     background: var(--primary); color: #fff;
-    padding: 14px 24px; display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px; display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 8px;
   }
   header h1 { font-size: 18px; font-weight: 600; }
+  header .user-info { font-size: 12px; opacity: .85; margin-left: 14px; font-weight: 400; }
+  header .user-info .role-tag {
+    background: rgba(255,255,255,.2); padding: 2px 8px; border-radius: 999px; margin-left: 6px;
+  }
+  header .actions { display: flex; gap: 8px; }
   header .actions button {
     background: #fff; color: var(--primary); border: none;
     padding: 8px 16px; border-radius: var(--radius); font-size: 14px;
     cursor: pointer; font-weight: 600;
   }
   header .actions button:hover { background: #e8eef5; }
+  header .actions button.ghost {
+    background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.5); font-weight: 400;
+  }
+  header .actions button.ghost:hover { background: rgba(255,255,255,.12); }
+
+  /* ── Tabs ── */
+  nav.tabs {
+    display: flex; gap: 2px; padding: 0 24px; background: var(--primary);
+  }
+  nav.tabs button {
+    background: transparent; color: rgba(255,255,255,.7); border: none;
+    padding: 10px 20px; font-size: 14px; cursor: pointer; font-weight: 600;
+    border-radius: var(--radius) var(--radius) 0 0;
+  }
+  nav.tabs button.active { background: var(--bg); color: var(--primary); }
+  nav.tabs button:not(.active):hover { color: #fff; }
+
+  .tab-page { display: none; }
+  .tab-page.active { display: block; }
 
   /* ── Layout ── */
   .container { display: flex; gap: 16px; padding: 16px 24px; max-width: 1400px; margin: 0 auto; }
@@ -49,6 +75,23 @@
   }
   .card-body { padding: 16px; }
 
+  /* ── 儀表板 ── */
+  .dash-wrap { padding: 16px 24px; max-width: 1400px; margin: 0 auto; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 12px; margin-bottom: 16px;
+  }
+  .stat-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px; cursor: pointer; transition: border-color .12s;
+  }
+  .stat-card:hover { border-color: var(--primary-light); }
+  .stat-card .stat-label { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+  .stat-card .stat-num { font-size: 28px; font-weight: 700; font-family: "SF Mono", Consolas, monospace; }
+  .stat-card .stat-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+  .stat-card.alert .stat-num { color: var(--danger); }
+  .stat-card.warn .stat-num { color: #b45309; }
+
   /* ── 搜尋列 ── */
   .toolbar { display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
   .toolbar input[type="search"] {
@@ -59,12 +102,18 @@
     padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius);
     font-size: 14px; background: #fff;
   }
+  .toolbar button.btn-export {
+    padding: 8px 14px; border: 1px solid var(--border); border-radius: var(--radius);
+    background: #fff; cursor: pointer; font-size: 13px;
+  }
+  .toolbar button.btn-export:hover { background: #f0f4f8; }
 
   /* ── 文件表格 ── */
+  .table-scroll { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; }
   th {
     text-align: left; padding: 10px 12px; font-size: 12px; color: var(--text-muted);
-    border-bottom: 2px solid var(--border); background: #fafbfc; font-weight: 600;
+    border-bottom: 2px solid var(--border); background: #fafbfc; font-weight: 600; white-space: nowrap;
   }
   td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
   tbody tr { cursor: pointer; transition: background .12s; }
@@ -81,6 +130,8 @@
   .badge-已廢止 { background: #f3f4f6; color: #6b7280; }
 
   .doc-id { font-family: "SF Mono", Consolas, monospace; font-size: 12px; color: var(--text-muted); }
+  .review-overdue { color: var(--danger); font-weight: 700; }
+  .review-soon { color: #b45309; font-weight: 600; }
 
   /* ── 詳細面板 ── */
   .detail-empty { padding: 48px 16px; text-align: center; color: var(--text-muted); }
@@ -115,10 +166,23 @@
   .rel-item .rel-title { font-weight: 600; font-size: 13px; }
   .rel-item .rel-sub { font-size: 12px; color: var(--text-muted); }
   .rel-item .btn-del {
-    flex-shrink: 0; border: none; background: none; color: #dc2626;
+    flex-shrink: 0; border: none; background: none; color: var(--danger);
     cursor: pointer; font-size: 13px; padding: 4px;
   }
   .rel-item .btn-del:hover { text-decoration: underline; }
+
+  /* 版本歷史 */
+  .hist-item {
+    display: flex; gap: 10px; padding: 7px 4px; border-bottom: 1px dashed var(--border);
+    font-size: 12px; align-items: baseline;
+  }
+  .hist-item .hist-time { flex-shrink: 0; color: var(--text-muted); font-family: "SF Mono", Consolas, monospace; }
+  .hist-item .hist-action {
+    flex-shrink: 0; font-weight: 600; padding: 1px 8px; border-radius: 4px;
+    background: #eef2f7; color: var(--primary);
+  }
+  .hist-item .hist-body { flex: 1; min-width: 0; color: var(--text); word-break: break-all; }
+  .hist-item .hist-op { color: var(--text-muted); }
 
   .detail-actions { display: flex; gap: 8px; margin-top: 16px; }
   .detail-actions button {
@@ -126,7 +190,20 @@
     cursor: pointer; font-weight: 600; border: 1px solid var(--border); background: #fff;
   }
   .detail-actions .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
-  .detail-actions .btn-danger { color: #dc2626; border-color: #fca5a5; }
+  .detail-actions .btn-danger { color: var(--danger); border-color: #fca5a5; }
+
+  /* ── 關聯圖 ── */
+  .graph-wrap { padding: 16px 24px; max-width: 1400px; margin: 0 auto; }
+  .graph-legend {
+    display: flex; gap: 16px; flex-wrap: wrap; padding: 10px 16px;
+    border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-muted);
+    align-items: center;
+  }
+  .graph-legend .lg { display: inline-flex; align-items: center; gap: 5px; }
+  .graph-legend .lg .sw { width: 18px; height: 3px; border-radius: 2px; display: inline-block; }
+  .graph-scroll { overflow: auto; max-height: 75vh; }
+  .graph-node { cursor: pointer; }
+  .graph-node:hover rect { stroke-width: 2.5; }
 
   /* ── Modal ── */
   .modal-backdrop {
@@ -138,7 +215,15 @@
     background: #fff; border-radius: 12px; width: min(480px, 92vw);
     max-height: 86vh; display: flex; flex-direction: column;
   }
-  .modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 16px; }
+  .modal.wide { width: min(680px, 94vw); }
+  .modal-header {
+    padding: 16px 20px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 16px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .modal-header .btn-x {
+    border: none; background: none; font-size: 18px; cursor: pointer; color: var(--text-muted);
+    padding: 0 4px; line-height: 1;
+  }
   .modal-body { padding: 16px 20px; overflow-y: auto; max-height: 70vh; }
   .modal-footer {
     padding: 12px 20px; border-top: 1px solid var(--border);
@@ -157,6 +242,9 @@
     border-radius: var(--radius); font-size: 14px; font-family: inherit;
   }
   .form-group textarea { resize: vertical; min-height: 60px; }
+  .form-group .field-hint { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+  .form-row { display: flex; gap: 10px; }
+  .form-row .form-group { flex: 1; }
 
   /* ── Toast ── */
   #toast {
@@ -166,7 +254,24 @@
   }
   #toast.show { opacity: 1; }
 
-  /* ── Loading ── */
+  /* ── 首載進度條（house 規格：N 秒勻速到 90%，完成才跳 100%）── */
+  #bootProgress {
+    position: fixed; inset: 0; background: var(--bg); z-index: 300;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  }
+  #bootProgress[hidden] { display: none; }
+  #bootProgress .pb-title { font-size: 16px; font-weight: 600; color: var(--primary); }
+  #bootProgress .pb-track {
+    width: min(360px, 80vw); height: 8px; background: #e2e8f0; border-radius: 999px; overflow: hidden;
+  }
+  #bootProgress .pb-fill {
+    height: 100%; width: 0%; background: var(--primary); border-radius: 999px;
+    transition: width .1s linear;
+  }
+  #bootProgress .pb-pct { font-size: 13px; color: var(--text-muted); font-family: "SF Mono", Consolas, monospace; }
+  #bootProgress .pb-msg { font-size: 12px; color: var(--text-muted); }
+
+  /* ── 操作中遮罩（送出型操作用）── */
   #loading {
     position: fixed; inset: 0; background: rgba(255,255,255,.7);
     display: flex; align-items: center; justify-content: center; z-index: 150;
@@ -183,38 +288,86 @@
 <body>
 
 <header>
-  <h1>📁 文件管理系統</h1>
+  <h1>📁 文件管理
+    <span class="user-info" id="userInfo"></span>
+  </h1>
   <div class="actions">
-    <button onclick="openDocModal()">＋ 新增文件</button>
+    <button class="ghost" id="btnViewToggle" style="display:none" onclick="toggleAdminView()">切換為一般視角</button>
+    <button id="btnNewDoc" style="display:none" onclick="openDocModal()">＋ 新增文件</button>
   </div>
 </header>
 
-<div class="container">
-  <!-- 左側：文件清單 -->
-  <div class="panel-list">
+<nav class="tabs">
+  <button id="tabBtn-dash" class="active" onclick="switchTab('dash')">儀表板</button>
+  <button id="tabBtn-list" onclick="switchTab('list')">文件清單</button>
+  <button id="tabBtn-graph" onclick="switchTab('graph')">關聯圖</button>
+</nav>
+
+<!-- ═══ 頁籤 1：儀表板 ═══ -->
+<div class="tab-page active" id="tabPage-dash">
+  <div class="dash-wrap">
+    <div class="stat-grid" id="statGrid"></div>
     <div class="card">
-      <div class="toolbar">
-        <input type="search" id="searchInput" placeholder="搜尋文件編號、標題、負責人…">
-        <select id="filterCategory"><option value="">全部類別</option></select>
-        <select id="filterStatus"><option value="">全部狀態</option></select>
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th>文件編號</th><th>標題</th><th>類別</th><th>狀態</th><th>負責人</th><th>版本</th>
-          </tr>
-        </thead>
-        <tbody id="docTableBody"></tbody>
-      </table>
+      <div class="card-header">⏰ 審查追蹤（已發布文件）</div>
+      <div class="card-body" id="reviewList"></div>
     </div>
   </div>
+</div>
 
-  <!-- 右側：詳細面板 -->
-  <div class="panel-detail">
+<!-- ═══ 頁籤 2：文件清單 ═══ -->
+<div class="tab-page" id="tabPage-list">
+  <div class="container">
+    <!-- 左側：文件清單 -->
+    <div class="panel-list">
+      <div class="card">
+        <div class="toolbar">
+          <input type="search" id="searchInput" placeholder="搜尋文件編號、標題、負責人…">
+          <select id="filterCategory"><option value="">全部類別</option></select>
+          <select id="filterStatus"><option value="">全部狀態</option></select>
+          <button class="btn-export" onclick="exportCsv()">⬇ 匯出 CSV</button>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>文件編號</th><th>標題</th><th>類別</th><th>狀態</th><th>負責人</th><th>版本</th><th>下次審查</th>
+              </tr>
+            </thead>
+            <tbody id="docTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右側：詳細面板 -->
+    <div class="panel-detail">
+      <div class="card">
+        <div class="card-header">文件詳細</div>
+        <div class="card-body" id="detailPanel">
+          <div class="detail-empty">點選左側文件查看詳細資訊與關聯</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 頁籤 3：關聯圖 ═══ -->
+<div class="tab-page" id="tabPage-graph">
+  <div class="graph-wrap">
     <div class="card">
-      <div class="card-header">文件詳細</div>
-      <div class="card-body" id="detailPanel">
-        <div class="detail-empty">點選左側文件查看詳細資訊與關聯</div>
+      <div class="card-header">
+        <span>文件關聯圖（僅顯示直接關聯）</span>
+        <button class="btn-export" onclick="loadGraph(true)">↻ 重新整理</button>
+      </div>
+      <div class="graph-legend">
+        <span class="lg"><span class="sw" style="background:#94a3b8"></span>references</span>
+        <span class="lg"><span class="sw" style="background:#dc2626"></span>supersedes</span>
+        <span class="lg"><span class="sw" style="background:#7c3aed"></span>derived_from</span>
+        <span class="lg"><span class="sw" style="background:#0891b2"></span>related</span>
+        <span style="margin-left:auto">節點顏色＝文件狀態；點擊節點跳至文件詳細</span>
+      </div>
+      <div class="graph-scroll" id="graphContainer">
+        <div class="detail-empty">載入中…</div>
       </div>
     </div>
   </div>
@@ -223,19 +376,37 @@
 <!-- 新增/編輯文件 Modal -->
 <div class="modal-backdrop" id="docModal">
   <div class="modal">
-    <div class="modal-header" id="docModalTitle">新增文件</div>
+    <div class="modal-header">
+      <span id="docModalTitle">新增文件</span>
+      <button class="btn-x" onclick="tryCloseModal('docModal')">✕</button>
+    </div>
     <div class="modal-body">
       <input type="hidden" id="f_doc_id">
       <div class="form-group"><label>標題 *</label><input id="f_title" required></div>
-      <div class="form-group"><label>類別</label><select id="f_category"></select></div>
-      <div class="form-group"><label>狀態</label><select id="f_status"></select></div>
-      <div class="form-group"><label>負責人</label><input id="f_owner"></div>
-      <div class="form-group"><label>負責人 ID</label><input id="f_owner_id"></div>
-      <div class="form-group"><label>版本</label><input id="f_version" placeholder="例：1.0"></div>
+      <div class="form-row">
+        <div class="form-group"><label>類別</label><select id="f_category"></select></div>
+        <div class="form-group"><label>狀態</label><select id="f_status"></select>
+          <div class="field-hint" id="statusHint"></div>
+        </div>
+      </div>
+      <div class="form-group"><label>負責人（從人員名單選擇）</label>
+        <select id="f_owner_select"><option value="">— 選擇人員 —</option></select>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>負責人姓名</label><input id="f_owner"></div>
+        <div class="form-group"><label>負責人 ID</label><input id="f_owner_id"></div>
+      </div>
+      <div class="form-group"><label>負責人信箱</label><input id="f_owner_email" placeholder="留空＝建立者本人">
+        <div class="field-hint">用於權限判定：此信箱的使用者可編輯本文件</div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>版本</label><input id="f_version" placeholder="例：1.0"></div>
+        <div class="form-group"><label>審查週期（月）</label><select id="f_review_cycle"></select></div>
+      </div>
       <div class="form-group"><label>Google Drive 位置</label><input id="f_drive_loc" placeholder="https://drive.google.com/..."></div>
     </div>
     <div class="modal-footer">
-      <button onclick="closeModal('docModal')">取消</button>
+      <button onclick="tryCloseModal('docModal')">取消</button>
       <button class="btn-primary" onclick="saveDoc()">儲存</button>
     </div>
   </div>
@@ -244,22 +415,49 @@
 <!-- 新增關聯 Modal -->
 <div class="modal-backdrop" id="relModal">
   <div class="modal">
-    <div class="modal-header">新增關聯</div>
+    <div class="modal-header">
+      <span>新增關聯</span>
+      <button class="btn-x" onclick="tryCloseModal('relModal')">✕</button>
+    </div>
     <div class="modal-body">
       <div class="form-group"><label>來源文件</label><input id="r_ancestor" disabled></div>
       <div class="form-group"><label>關聯到（目標文件）*</label><select id="r_descendant"></select></div>
-      <div class="form-group"><label>關聯類型</label><select id="r_type"></select></div>
+      <div class="form-group"><label>關聯類型</label><select id="r_type"></select>
+        <div class="field-hint">supersedes（取代）：若目標文件為「已發布」，將自動標為「已廢止」</div>
+      </div>
       <div class="form-group"><label>說明</label><textarea id="r_desc" placeholder="選填，例如：政策總綱引用此程序書"></textarea></div>
     </div>
     <div class="modal-footer">
-      <button onclick="closeModal('relModal')">取消</button>
+      <button onclick="tryCloseModal('relModal')">取消</button>
       <button class="btn-primary" onclick="saveRelation()">建立關聯</button>
     </div>
   </div>
 </div>
 
+<!-- 儀表板卡片清單 Modal -->
+<div class="modal-backdrop" id="statModal">
+  <div class="modal wide">
+    <div class="modal-header">
+      <span id="statModalTitle">文件清單</span>
+      <button class="btn-x" onclick="closeModal('statModal')">✕</button>
+    </div>
+    <div class="modal-body" id="statModalBody"></div>
+    <div class="modal-footer">
+      <button onclick="closeModal('statModal')">關閉</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
-<div id="loading">載入中…</div>
+<div id="loading" class="hide">處理中…</div>
+
+<!-- 首載進度條 -->
+<div id="bootProgress">
+  <div class="pb-title">📁 文件管理</div>
+  <div class="pb-track"><div class="pb-fill" id="pbFill"></div></div>
+  <div class="pb-pct" id="pbPct">0%</div>
+  <div class="pb-msg" id="pbMsg">正在連線…</div>
+</div>
 
 <script>
 // ============================================================
@@ -269,7 +467,19 @@ let allDocs = [];
 let statuses = [];
 let categories = [];
 let relationTypes = [];
+let reviewCycles = [];
+let statusTransitions = {};
+let hrPeople = [];
+let currentUser = { email: '', name: '', isAdmin: false, isWhitelisted: false };
+let isAdminView = false;   // 視角切換（UI 用）；權限判定一律以後端真實身分為準
 let selectedDocId = null;
+let graphCache = null;
+
+// Modal dirty 防護：開啟時記錄表單快照，關閉前比對
+let modalSnapshots = {};
+
+// 注音輸入法防護：組字期間不觸發搜尋
+let isComposing = false;
 
 // ── 工具 ──────────────────────────────────────────────────
 function escapeHtml(str) {
@@ -280,46 +490,143 @@ function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2200);
+  setTimeout(() => t.classList.remove('show'), 2600);
 }
 function showLoading(on) {
   document.getElementById('loading').classList.toggle('hide', !on);
 }
-function closeModal(id) {
-  document.getElementById(id).classList.remove('show');
-}
 function statusBadge(s) {
   return `<span class="badge badge-${escapeHtml(s)}">${escapeHtml(s)}</span>`;
+}
+function debounce(fn, ms) {
+  let t;
+  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+// yyyy/MM/dd 字串 → Date（無效回傳 null）
+function parseYmd(str) {
+  if (!str) return null;
+  const m = String(str).match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  if (!m) return null;
+  return new Date(+m[1], +m[2] - 1, +m[3]);
+}
+function daysUntil(str) {
+  const d = parseYmd(str);
+  if (!d) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  return Math.round((d - today) / 86400000);
+}
+
+// ── 權限（UI 顯示用；後端另有真實檢查）─────────────────────
+function canEditDoc(doc) {
+  if (currentUser.isAdmin && isAdminView) return true;
+  return !!doc.owner_email &&
+    doc.owner_email.toLowerCase() === currentUser.email.toLowerCase();
+}
+function canDelete() { return currentUser.isAdmin && isAdminView; }
+
+// ============================================================
+// 首載假進度條（house 規格：5 秒勻速到 90%，完成才跳 100%）
+// ============================================================
+function startFakeProgress(seconds, messages) {
+  const fill = document.getElementById('pbFill');
+  const pct = document.getElementById('pbPct');
+  const msgEl = document.getElementById('pbMsg');
+  let p = 0;
+  const tick = 100;
+  const step = 90 / (seconds * 1000 / tick);
+
+  const msgTimer = setInterval(() => {
+    msgEl.textContent = messages[Math.floor(Math.random() * messages.length)];
+  }, 1000);
+  const barTimer = setInterval(() => {
+    p = Math.min(90, p + step);
+    fill.style.width = p + '%';
+    pct.textContent = Math.round(p) + '%';
+  }, tick);
+
+  return {
+    finish() {
+      clearInterval(barTimer); clearInterval(msgTimer);
+      fill.style.width = '100%'; pct.textContent = '100%';
+      setTimeout(() => { document.getElementById('bootProgress').hidden = true; }, 400);
+    },
+    fail(msg) {
+      clearInterval(barTimer); clearInterval(msgTimer);
+      msgEl.textContent = msg;
+      msgEl.style.color = '#dc2626';
+      pct.textContent = '';
+    },
+  };
 }
 
 // ============================================================
 // 初始化
 // ============================================================
 window.addEventListener('DOMContentLoaded', () => {
+  const progress = startFakeProgress(5, [
+    '正在載入文件清單…', '正在核對人員名單…', '正在整理文件關聯…', '正在準備儀表板…',
+  ]);
+
   google.script.run
     .withSuccessHandler(data => {
       allDocs = data.docs;
       statuses = data.statuses;
       categories = data.categories;
       relationTypes = data.relationTypes;
+      reviewCycles = data.reviewCycles || [6, 12, 24, 36];
+      statusTransitions = data.statusTransitions || {};
+      currentUser = data.user || currentUser;
+      hrPeople = data.hrPeople || [];
+      isAdminView = currentUser.isAdmin; // 管理員預設用管理視角
+
+      renderUserInfo();
       initFilters();
       renderTable();
-      showLoading(false);
+      renderDashboard();
+      progress.finish();
     })
     .withFailureHandler(err => {
-      showLoading(false);
-      showToast('載入失敗：' + err.message);
+      progress.fail('載入失敗：' + err.message + '（請重新整理頁面重試）');
     })
     .apiGetInitData();
 
-  document.getElementById('searchInput').addEventListener('input', debounce(renderTable, 180));
+  // 搜尋框：擋注音組字（composition 期間不觸發 filter）
+  const search = document.getElementById('searchInput');
+  search.addEventListener('compositionstart', () => { isComposing = true; });
+  search.addEventListener('compositionend', () => { isComposing = false; renderTable(); });
+  search.addEventListener('input', debounce(() => { if (!isComposing) renderTable(); }, 180));
+  search.addEventListener('keydown', e => {
+    // 注音選字的 Enter 不可觸發任何送出行為
+    if (e.key === 'Enter' && (e.isComposing || e.keyCode === 229)) e.preventDefault();
+  });
+
   document.getElementById('filterCategory').addEventListener('change', renderTable);
   document.getElementById('filterStatus').addEventListener('change', renderTable);
 });
 
-function debounce(fn, ms) {
-  let t;
-  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+function renderUserInfo() {
+  const el = document.getElementById('userInfo');
+  const roleTag = currentUser.isAdmin
+    ? `<span class="role-tag">${isAdminView ? '管理視角' : '一般視角'}</span>`
+    : '';
+  el.innerHTML = `${escapeHtml(currentUser.name || currentUser.email)}${roleTag}`;
+
+  // 視角切換鈕（僅管理員可見）
+  const toggle = document.getElementById('btnViewToggle');
+  toggle.style.display = currentUser.isAdmin ? '' : 'none';
+  toggle.textContent = isAdminView ? '切換為一般視角' : '切換為管理視角';
+
+  // 新增文件：白名單使用者皆可
+  document.getElementById('btnNewDoc').style.display = currentUser.isWhitelisted ? '' : 'none';
+}
+
+function toggleAdminView() {
+  isAdminView = !isAdminView;
+  renderUserInfo();
+  renderTable();
+  if (selectedDocId) selectDoc(selectedDocId); // 重新渲染詳細面板的按鈕
+  showToast(isAdminView ? '已切換為管理視角' : '已切換為一般視角');
 }
 
 function initFilters() {
@@ -335,6 +642,109 @@ function initFilters() {
     o.value = s; o.textContent = s;
     stSel.appendChild(o);
   });
+}
+
+// ============================================================
+// 頁籤切換
+// ============================================================
+function switchTab(name) {
+  ['dash', 'list', 'graph'].forEach(t => {
+    document.getElementById('tabBtn-' + t).classList.toggle('active', t === name);
+    document.getElementById('tabPage-' + t).classList.toggle('active', t === name);
+  });
+  if (name === 'dash') renderDashboard();
+  if (name === 'graph' && !graphCache) loadGraph();
+}
+
+// ============================================================
+// 儀表板（全部前端計算，不加後端 API）
+// ============================================================
+const REVIEW_SOON_DAYS = 30;
+
+function dashBuckets() {
+  const published = allDocs.filter(d => d.status === '已發布');
+  const overdue = published.filter(d => {
+    const n = daysUntil(d.next_review);
+    return n !== null && n < 0;
+  });
+  const soon = published.filter(d => {
+    const n = daysUntil(d.next_review);
+    return n !== null && n >= 0 && n <= REVIEW_SOON_DAYS;
+  });
+  const buckets = {
+    all:     { label: '全部文件', docs: allDocs },
+    overdue: { label: '逾期未審', docs: overdue, cls: 'alert', hint: '已發布且審查日已過' },
+    soon:    { label: `${REVIEW_SOON_DAYS} 日內到審`, docs: soon, cls: 'warn', hint: '請安排文件審查' },
+  };
+  statuses.forEach(s => {
+    buckets['st_' + s] = { label: s, docs: allDocs.filter(d => d.status === s) };
+  });
+  return buckets;
+}
+
+function renderDashboard() {
+  const buckets = dashBuckets();
+  const order = ['all', ...statuses.map(s => 'st_' + s), 'overdue', 'soon'];
+
+  document.getElementById('statGrid').innerHTML = order.map(key => {
+    const b = buckets[key];
+    return `
+      <div class="stat-card ${b.docs.length > 0 ? (b.cls || '') : ''}" onclick="openStatModal('${key}')">
+        <div class="stat-label">${escapeHtml(b.label)}</div>
+        <div class="stat-num">${b.docs.length}</div>
+        ${b.hint ? `<div class="stat-hint">${escapeHtml(b.hint)}</div>` : ''}
+      </div>`;
+  }).join('');
+
+  // 審查追蹤清單：逾期在前、其次依審查日排序
+  const tracked = allDocs
+    .filter(d => d.status === '已發布' && d.next_review)
+    .sort((a, b) => (daysUntil(a.next_review) ?? 9999) - (daysUntil(b.next_review) ?? 9999));
+
+  const listEl = document.getElementById('reviewList');
+  if (tracked.length === 0) {
+    listEl.innerHTML = '<div style="color:#9ca3af;font-size:13px">目前沒有已發布且設定審查日的文件。發布文件時會自動依審查週期排定下次審查日。</div>';
+    return;
+  }
+  listEl.innerHTML = tracked.map(d => {
+    const n = daysUntil(d.next_review);
+    let tag;
+    if (n === null)      tag = '<span style="color:#9ca3af">—</span>';
+    else if (n < 0)      tag = `<span class="review-overdue">逾期 ${-n} 天</span>`;
+    else if (n <= REVIEW_SOON_DAYS) tag = `<span class="review-soon">剩 ${n} 天</span>`;
+    else                 tag = `<span style="color:#6b7280">剩 ${n} 天</span>`;
+    return `
+      <div class="rel-item" style="cursor:pointer" onclick="gotoDoc('${escapeHtml(d.doc_id)}')">
+        <div class="rel-info">
+          <div class="rel-title">${escapeHtml(d.doc_id)}｜${escapeHtml(d.title)}</div>
+          <div class="rel-sub">負責人 ${escapeHtml(d.owner)}｜下次審查 ${escapeHtml(d.next_review)}</div>
+        </div>
+        ${tag}
+      </div>`;
+  }).join('');
+}
+
+// 儀表板卡片點擊 → 彈窗清單（無資料也開窗顯示「無項目」）
+function openStatModal(key) {
+  const b = dashBuckets()[key];
+  if (!b) return;
+  document.getElementById('statModalTitle').textContent = `${b.label}（${b.docs.length} 件）`;
+  document.getElementById('statModalBody').innerHTML = b.docs.length === 0
+    ? '<div class="detail-empty">無項目</div>'
+    : b.docs.map(d => `
+      <div class="rel-item" style="cursor:pointer" onclick="closeModal('statModal');gotoDoc('${escapeHtml(d.doc_id)}')">
+        <div class="rel-info">
+          <div class="rel-title">${escapeHtml(d.doc_id)}｜${escapeHtml(d.title)}</div>
+          <div class="rel-sub">${statusBadge(d.status)} ${escapeHtml(d.category)}｜負責人 ${escapeHtml(d.owner)}｜v${escapeHtml(d.version)}</div>
+        </div>
+      </div>`).join('');
+  document.getElementById('statModal').classList.add('show');
+}
+
+// 從儀表板／關聯圖跳到文件詳細
+function gotoDoc(docId) {
+  switchTab('list');
+  selectDoc(docId);
 }
 
 // ============================================================
@@ -359,7 +769,7 @@ function renderTable() {
   tbody.innerHTML = '';
 
   if (filtered.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#6b7280;padding:32px">沒有符合條件的文件</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#6b7280;padding:32px">沒有符合條件的文件</td></tr>';
     return;
   }
 
@@ -372,10 +782,55 @@ function renderTable() {
       <td>${escapeHtml(d.category)}</td>
       <td>${statusBadge(d.status)}</td>
       <td>${escapeHtml(d.owner)}</td>
-      <td>${escapeHtml(d.version)}</td>`;
+      <td>${escapeHtml(d.version)}</td>
+      <td>${reviewCell(d)}</td>`;
     tr.addEventListener('click', () => selectDoc(d.doc_id));
     tbody.appendChild(tr);
   });
+}
+
+function reviewCell(d) {
+  if (d.status !== '已發布' || !d.next_review) return '<span style="color:#d1d5db">—</span>';
+  const n = daysUntil(d.next_review);
+  if (n === null) return escapeHtml(d.next_review);
+  if (n < 0)  return `<span class="review-overdue">${escapeHtml(d.next_review)}</span>`;
+  if (n <= REVIEW_SOON_DAYS) return `<span class="review-soon">${escapeHtml(d.next_review)}</span>`;
+  return escapeHtml(d.next_review);
+}
+
+// ============================================================
+// CSV 匯出（前端組檔，加 BOM 避免 Excel 中文亂碼）
+// ============================================================
+function exportCsv() {
+  const kw = document.getElementById('searchInput').value.trim().toLowerCase();
+  const cat = document.getElementById('filterCategory').value;
+  const st = document.getElementById('filterStatus').value;
+  const filtered = allDocs.filter(d => {
+    if (cat && d.category !== cat) return false;
+    if (st && d.status !== st) return false;
+    if (kw && !(`${d.doc_id} ${d.title} ${d.owner}`.toLowerCase().includes(kw))) return false;
+    return true;
+  });
+
+  const headers = ['文件編號','標題','類別','狀態','負責人','負責人ID','負責人信箱','更新日期','版本','發布日期','下次審查日','審查週期(月)','Drive位置'];
+  const csvEscape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = [headers.map(csvEscape).join(',')];
+  filtered.forEach(d => {
+    lines.push([
+      d.doc_id, d.title, d.category, d.status, d.owner, d.owner_id, d.owner_email,
+      d.updated_at, d.version, d.published_at, d.next_review, d.review_cycle, d.drive_loc,
+    ].map(csvEscape).join(','));
+  });
+
+  // \uFEFF = BOM：Excel 開 UTF-8 CSV 不加會中文亂碼
+  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  a.download = `文件清單_${stamp}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast(`已匯出 ${filtered.length} 筆文件`);
 }
 
 // ============================================================
@@ -386,16 +841,30 @@ function selectDoc(docId) {
   renderTable(); // 更新 active 樣式
   renderDetailSkeleton(docId);
 
-  // 平行載入：關聯（向下）+ 反查（向上）
-  google.script.run
-    .withSuccessHandler(desc => {
-      google.script.run
-        .withSuccessHandler(anc => renderDetail(docId, desc, anc))
-        .withFailureHandler(err => showToast('反查失敗：' + err.message))
-        .apiGetAncestors(docId);
-    })
-    .withFailureHandler(err => showToast('關聯載入失敗：' + err.message))
-    .apiGetDescendants(docId, 99);
+  // 三個查詢平行發出，全部到齊才渲染
+  const results = {};
+  let pending = 3;
+  let failed = false;
+  const arrive = (key, val) => {
+    results[key] = val;
+    if (--pending === 0 && !failed) {
+      renderDetail(docId, results.desc, results.anc, results.hist);
+    }
+  };
+  const onFail = label => err => {
+    if (failed) return;
+    failed = true;
+    showToast(label + '：' + err.message);
+    document.getElementById('detailPanel').innerHTML =
+      `<div class="detail-empty">關聯資料載入失敗，請重試<br><button onclick="selectDoc('${escapeHtml(docId)}')" style="margin-top:10px;padding:6px 16px;cursor:pointer">重新載入</button></div>`;
+  };
+
+  google.script.run.withSuccessHandler(v => arrive('desc', v))
+    .withFailureHandler(onFail('關聯載入失敗')).apiGetDescendants(docId, 99);
+  google.script.run.withSuccessHandler(v => arrive('anc', v))
+    .withFailureHandler(onFail('反查失敗')).apiGetAncestors(docId);
+  google.script.run.withSuccessHandler(v => arrive('hist', v))
+    .withFailureHandler(onFail('歷史載入失敗')).apiGetDocHistory(docId);
 }
 
 function renderDetailSkeleton(docId) {
@@ -404,16 +873,30 @@ function renderDetailSkeleton(docId) {
   document.getElementById('detailPanel').innerHTML = `
     <div class="detail-title">${escapeHtml(doc.title)}</div>
     <div class="doc-id">${escapeHtml(doc.doc_id)}</div>
-    <div style="color:#6b7280;padding:16px 0">關聯資料載入中…</div>`;
+    <div style="color:#6b7280;padding:16px 0;font-size:13px">關聯資料載入中…</div>`;
 }
 
-function renderDetail(docId, descendants, ancestors) {
+function renderDetail(docId, descendants, ancestors, history) {
   const doc = allDocs.find(d => d.doc_id === docId);
   if (!doc) return;
+  const editable = canEditDoc(doc);
 
   const driveLink = doc.drive_loc
     ? `<a href="${escapeHtml(doc.drive_loc)}" target="_blank" rel="noopener">開啟連結 ↗</a>`
     : '<span style="color:#9ca3af">未設定</span>';
+
+  // 審查資訊列（已發布文件才有意義）
+  let reviewRow = '';
+  if (doc.published_at || doc.next_review) {
+    const n = daysUntil(doc.next_review);
+    let due = escapeHtml(doc.next_review || '—');
+    if (n !== null && n < 0) due = `<span class="review-overdue">${escapeHtml(doc.next_review)}（逾期 ${-n} 天）</span>`;
+    else if (n !== null && n <= REVIEW_SOON_DAYS) due = `<span class="review-soon">${escapeHtml(doc.next_review)}（剩 ${n} 天）</span>`;
+    reviewRow = `
+      <dt>發布日期</dt><dd>${escapeHtml(doc.published_at || '—')}</dd>
+      <dt>下次審查</dt><dd>${due}</dd>
+      <dt>審查週期</dt><dd>${escapeHtml(doc.review_cycle || '—')} 個月</dd>`;
+  }
 
   const descHtml = descendants.length === 0
     ? '<div style="color:#9ca3af;font-size:13px;padding:6px 0">無關聯文件</div>'
@@ -426,7 +909,7 @@ function renderDetail(docId, descendants, ancestors) {
           <div class="rel-title">${escapeHtml(r.doc_id)}｜${escapeHtml(r.title)}</div>
           <div class="rel-sub">${statusBadge(r.status)} ${escapeHtml(r.relation_type)}</div>
         </div>
-        ${r.depth === 1 ? `<button class="btn-del" onclick="removeRelation('${escapeHtml(docId)}','${escapeHtml(r.doc_id)}')">移除</button>` : ''}
+        ${(r.depth === 1 && editable) ? `<button class="btn-del" onclick="removeRelation('${escapeHtml(docId)}','${escapeHtml(r.doc_id)}')">移除</button>` : ''}
       </div>`).join('');
 
   const ancHtml = ancestors.length === 0
@@ -442,6 +925,22 @@ function renderDetail(docId, descendants, ancestors) {
         </div>
       </div>`).join('');
 
+  const histHtml = (history || []).length === 0
+    ? '<div style="color:#9ca3af;font-size:13px;padding:6px 0">尚無異動紀錄</div>'
+    : history.map(h => `
+      <div class="hist-item">
+        <span class="hist-time">${escapeHtml(h.timestamp)}</span>
+        <span class="hist-action">${escapeHtml(h.action)}</span>
+        <span class="hist-body">${h.version ? 'v' + escapeHtml(h.version) + '｜' : ''}${escapeHtml(h.summary)}
+          <span class="hist-op">（${escapeHtml(h.operator)}）</span></span>
+      </div>`).join('');
+
+  const actionsHtml = `
+    <div class="detail-actions">
+      ${editable ? `<button class="btn-primary" onclick="openDocModal('${escapeHtml(docId)}')">編輯文件</button>` : ''}
+      ${canDelete() ? `<button class="btn-danger" onclick="deleteDoc('${escapeHtml(docId)}')">刪除文件</button>` : ''}
+    </div>`;
+
   document.getElementById('detailPanel').innerHTML = `
     <div class="detail-title">${escapeHtml(doc.title)}</div>
     <div class="doc-id">${escapeHtml(doc.doc_id)}</div>
@@ -449,25 +948,48 @@ function renderDetail(docId, descendants, ancestors) {
     <dl class="detail-meta">
       <dt>類別</dt><dd>${escapeHtml(doc.category)}</dd>
       <dt>狀態</dt><dd>${statusBadge(doc.status)}</dd>
-      <dt>負責人</dt><dd>${escapeHtml(doc.owner)}（${escapeHtml(doc.owner_id)}）</dd>
+      <dt>負責人</dt><dd>${escapeHtml(doc.owner)}（${escapeHtml(doc.owner_id)}）${doc.owner_email ? '<br>' + escapeHtml(doc.owner_email) : ''}</dd>
       <dt>版本</dt><dd>${escapeHtml(doc.version)}</dd>
       <dt>更新日期</dt><dd>${escapeHtml(doc.updated_at)}</dd>
+      ${reviewRow}
       <dt>Drive</dt><dd>${driveLink}</dd>
     </dl>
 
     <div class="section-title">
       <span>📎 此文件引用（向下關聯）</span>
-      <button onclick="openRelModal('${escapeHtml(docId)}')">＋ 新增關聯</button>
+      ${editable ? `<button onclick="openRelModal('${escapeHtml(docId)}')">＋ 新增關聯</button>` : ''}
     </div>
     ${descHtml}
 
     <div class="section-title"><span>🔗 被誰引用（向上反查）</span></div>
     ${ancHtml}
 
-    <div class="detail-actions">
-      <button class="btn-primary" onclick="openDocModal('${escapeHtml(docId)}')">編輯文件</button>
-      <button class="btn-danger" onclick="deleteDoc('${escapeHtml(docId)}')">刪除文件</button>
-    </div>`;
+    <div class="section-title"><span>🕘 版本歷史／異動紀錄</span></div>
+    <div style="max-height:220px;overflow-y:auto">${histHtml}</div>
+
+    ${(editable || canDelete()) ? actionsHtml : ''}`;
+}
+
+// ============================================================
+// Modal 共用：dirty 防護（點背景不關閉；有未存內容時關閉前確認）
+// ============================================================
+function snapshotModal(id) {
+  const inputs = document.querySelectorAll(`#${id} input, #${id} select, #${id} textarea`);
+  return Array.from(inputs).map(el => el.value).join('');
+}
+function openModalWithGuard(id) {
+  document.getElementById(id).classList.add('show');
+  modalSnapshots[id] = snapshotModal(id);
+}
+function tryCloseModal(id) {
+  if (modalSnapshots[id] !== undefined && snapshotModal(id) !== modalSnapshots[id]) {
+    if (!confirm('尚有未儲存的內容，確定要關閉嗎？')) return;
+  }
+  closeModal(id);
+}
+function closeModal(id) {
+  document.getElementById(id).classList.remove('show');
+  delete modalSnapshots[id];
 }
 
 // ============================================================
@@ -475,34 +997,73 @@ function renderDetail(docId, descendants, ancestors) {
 // ============================================================
 function openDocModal(docId) {
   const isEdit = !!docId;
+  const doc = isEdit ? allDocs.find(d => d.doc_id === docId) : null;
+  if (isEdit && !doc) { showToast('找不到文件：' + docId); return; }
   document.getElementById('docModalTitle').textContent = isEdit ? '編輯文件' : '新增文件';
   document.getElementById('f_doc_id').value = docId || '';
 
-  // 填充下拉選項
+  // 類別下拉
   const catSel = document.getElementById('f_category');
   catSel.innerHTML = categories.map(c => `<option>${escapeHtml(c)}</option>`).join('');
+
+  // 狀態下拉：只列「目前狀態＋允許的流轉目標」（後端另有查表驗證）
   const stSel = document.getElementById('f_status');
-  stSel.innerHTML = statuses.map(s => `<option>${escapeHtml(s)}</option>`).join('');
+  const hint = document.getElementById('statusHint');
+  if (isEdit) {
+    let allowed = statusTransitions[doc.status] || [];
+    // 已廢止 → 草稿 僅限管理員，一般負責人不顯示該選項
+    if (doc.status === '已廢止' && !(currentUser.isAdmin && isAdminView)) allowed = [];
+    const options = [doc.status, ...allowed];
+    stSel.innerHTML = options.map(s => `<option>${escapeHtml(s)}</option>`).join('');
+    hint.textContent = allowed.length
+      ? `可轉移：${allowed.join('、')}`
+      : '目前狀態不可變更';
+  } else {
+    stSel.innerHTML = ['草稿', '審核中'].map(s => `<option>${escapeHtml(s)}</option>`).join('');
+    hint.textContent = '新文件從草稿或審核中開始';
+  }
+
+  // 負責人下拉（HR 人員名單）＋手動欄位
+  const ownerSel = document.getElementById('f_owner_select');
+  ownerSel.innerHTML = '<option value="">— 選擇人員 —</option>' +
+    hrPeople.map(p =>
+      `<option value="${escapeHtml(p.email)}" data-name="${escapeHtml(p.name)}">${escapeHtml(p.name)}（${escapeHtml(p.email)}）</option>`
+    ).join('');
+  ownerSel.onchange = () => {
+    const opt = ownerSel.selectedOptions[0];
+    if (!opt || !opt.value) return;
+    document.getElementById('f_owner').value = opt.dataset.name || '';
+    document.getElementById('f_owner_email').value = opt.value;
+  };
+
+  // 審查週期下拉
+  const cycleSel = document.getElementById('f_review_cycle');
+  cycleSel.innerHTML = reviewCycles.map(m => `<option value="${m}">${m}</option>`).join('');
 
   if (isEdit) {
-    const doc = allDocs.find(d => d.doc_id === docId);
     document.getElementById('f_title').value = doc.title;
     catSel.value = doc.category;
     stSel.value = doc.status;
     document.getElementById('f_owner').value = doc.owner;
     document.getElementById('f_owner_id').value = doc.owner_id;
+    document.getElementById('f_owner_email').value = doc.owner_email || '';
     document.getElementById('f_version').value = doc.version;
     document.getElementById('f_drive_loc').value = doc.drive_loc;
+    cycleSel.value = doc.review_cycle || '12';
+    ownerSel.value = (doc.owner_email || '').toLowerCase();
   } else {
     document.getElementById('f_title').value = '';
-    document.getElementById('f_owner').value = '';
+    document.getElementById('f_owner').value = currentUser.name || '';
     document.getElementById('f_owner_id').value = '';
+    document.getElementById('f_owner_email').value = currentUser.email || '';
     document.getElementById('f_version').value = '0.1';
     document.getElementById('f_drive_loc').value = '';
     stSel.value = '草稿';
+    cycleSel.value = '12';
+    ownerSel.value = (currentUser.email || '').toLowerCase();
   }
 
-  document.getElementById('docModal').classList.add('show');
+  openModalWithGuard('docModal');
 }
 
 function saveDoc() {
@@ -514,8 +1075,10 @@ function saveDoc() {
     status: document.getElementById('f_status').value,
     owner: document.getElementById('f_owner').value.trim(),
     owner_id: document.getElementById('f_owner_id').value.trim(),
+    owner_email: document.getElementById('f_owner_email').value.trim(),
     version: document.getElementById('f_version').value.trim(),
     drive_loc: document.getElementById('f_drive_loc').value.trim(),
+    review_cycle: document.getElementById('f_review_cycle').value,
   };
   if (!payload.title) { showToast('請輸入標題'); return; }
 
@@ -527,37 +1090,63 @@ function saveDoc() {
       showLoading(false);
       if (!res.success) { showToast('儲存失敗：' + res.error); return; }
       closeModal('docModal');
-      showToast(docId ? '已更新' : '已新增：' + res.doc_id);
-      reloadDocs(docId || res.doc_id);
+
+      // 樂觀更新：直接用輸入值改本地狀態，不整頁重載
+      const todayStr = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/-/g, '/');
+      if (docId) {
+        const idx = allDocs.findIndex(d => d.doc_id === docId);
+        if (idx >= 0) {
+          allDocs[idx] = Object.assign({}, allDocs[idx], payload, {
+            updated_at: todayStr,
+            published_at: res.published_at ?? allDocs[idx].published_at,
+            next_review:  res.next_review ?? allDocs[idx].next_review,
+          });
+        }
+        showToast('已更新');
+      } else {
+        allDocs.push(Object.assign({}, payload, {
+          doc_id: res.doc_id, updated_at: todayStr, published_at: '', next_review: '',
+        }));
+        showToast('已新增：' + res.doc_id);
+      }
+      renderTable();
+      renderDashboard();
+      selectDoc(docId || res.doc_id);
     })
     .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
     [apiName](payload);
 }
 
 function deleteDoc(docId) {
-  if (!confirm(`確定刪除 ${docId}？\n此操作會同步刪除所有相關的關聯記錄。`)) return;
+  if (!confirm(`確定刪除 ${docId}？\n此操作會同步刪除所有相關的關聯記錄，且無法復原。`)) return;
   showLoading(true);
   google.script.run
     .withSuccessHandler(res => {
       showLoading(false);
       if (!res.success) { showToast('刪除失敗：' + res.error); return; }
+      allDocs = allDocs.filter(d => d.doc_id !== docId);
       selectedDocId = null;
       document.getElementById('detailPanel').innerHTML =
         '<div class="detail-empty">點選左側文件查看詳細資訊與關聯</div>';
+      graphCache = null; // 關聯已變，下次進圖頁重新載入
       showToast('已刪除');
-      reloadDocs();
+      renderTable();
+      renderDashboard();
     })
     .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
     .apiDeleteDoc(docId);
 }
 
+// 全量重載（樂觀更新失敗或需要強制同步時使用）
 function reloadDocs(selectAfter) {
   google.script.run
     .withSuccessHandler(data => {
       allDocs = data.docs;
       renderTable();
+      renderDashboard();
       if (selectAfter) selectDoc(selectAfter);
     })
+    .withFailureHandler(err => showToast('重新載入失敗：' + err.message))
     .apiGetInitData();
 }
 
@@ -578,7 +1167,7 @@ function openRelModal(ancestorId) {
   typeSel.innerHTML = relationTypes.map(t => `<option>${escapeHtml(t)}</option>`).join('');
 
   document.getElementById('r_desc').value = '';
-  document.getElementById('relModal').classList.add('show');
+  openModalWithGuard('relModal');
 }
 
 function saveRelation() {
@@ -589,13 +1178,30 @@ function saveRelation() {
 
   if (!descendant) { showToast('請選擇目標文件'); return; }
 
+  // supersedes 會自動廢止已發布的目標文件 → 送出前確認
+  if (type === 'supersedes') {
+    const target = allDocs.find(d => d.doc_id === descendant);
+    if (target && target.status === '已發布') {
+      if (!confirm(`「${descendant}｜${target.title}」目前為已發布狀態。\n建立 supersedes 關聯後將自動標為「已廢止」，確定繼續？`)) return;
+    }
+  }
+
   showLoading(true);
   google.script.run
     .withSuccessHandler(res => {
       showLoading(false);
       if (!res.success) { showToast(res.error); return; }
       closeModal('relModal');
-      showToast(`已建立關聯（共寫入 ${res.added} 條路徑）`);
+      graphCache = null;
+      let msg = `已建立關聯（共寫入 ${res.added} 條路徑）`;
+      if (res.deprecated) {
+        msg += `，${res.deprecated} 已自動標為已廢止`;
+        const t = allDocs.find(d => d.doc_id === res.deprecated);
+        if (t) t.status = '已廢止';
+        renderTable();
+        renderDashboard();
+      }
+      showToast(msg);
       selectDoc(ancestor); // 重新載入詳細面板
     })
     .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
@@ -609,6 +1215,7 @@ function removeRelation(ancestorId, descendantId) {
     .withSuccessHandler(res => {
       showLoading(false);
       if (!res.success) { showToast('移除失敗：' + res.error); return; }
+      graphCache = null;
       showToast('已移除關聯');
       selectDoc(ancestorId);
     })
@@ -616,10 +1223,160 @@ function removeRelation(ancestorId, descendantId) {
     .apiRemoveRelation(ancestorId, descendantId);
 }
 
-// Modal 背景點擊關閉
-document.querySelectorAll('.modal-backdrop').forEach(m => {
-  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('show'); });
-});
+// ============================================================
+// 關聯圖（純前端 SVG，不依賴外部函式庫）
+// ============================================================
+const EDGE_COLORS = {
+  references:   '#94a3b8',
+  supersedes:   '#dc2626',
+  derived_from: '#7c3aed',
+  related:      '#0891b2',
+};
+const NODE_COLORS = {
+  '草稿':   { fill: '#fef3c7', stroke: '#d97706', text: '#92400e' },
+  '審核中': { fill: '#dbeafe', stroke: '#2563eb', text: '#1e40af' },
+  '已發布': { fill: '#d1fae5', stroke: '#059669', text: '#065f46' },
+  '已廢止': { fill: '#f3f4f6', stroke: '#9ca3af', text: '#6b7280' },
+};
+
+function loadGraph(force) {
+  if (force) graphCache = null;
+  const container = document.getElementById('graphContainer');
+  container.innerHTML = '<div class="detail-empty">載入中…</div>';
+
+  google.script.run
+    .withSuccessHandler(data => {
+      graphCache = data;
+      renderGraph(data);
+    })
+    .withFailureHandler(err => {
+      container.innerHTML =
+        `<div class="detail-empty">關聯圖載入失敗：${escapeHtml(err.message)}<br>
+         <button onclick="loadGraph(true)" style="margin-top:10px;padding:6px 16px;cursor:pointer">重試</button></div>`;
+    })
+    .apiGetGraphData();
+}
+
+// 最長路徑分層：Closure Table 已保證無循環（DAG），可安全做拓撲排序
+function computeLayers(nodes, edges) {
+  const indeg = new Map();
+  const children = new Map();
+  const connected = new Set();
+  nodes.forEach(n => indeg.set(n.id, 0));
+  edges.forEach(e => {
+    if (!indeg.has(e.from) || !indeg.has(e.to)) return; // 防孤兒邊
+    children.set(e.from, (children.get(e.from) || []).concat(e.to));
+    indeg.set(e.to, indeg.get(e.to) + 1);
+    connected.add(e.from); connected.add(e.to);
+  });
+
+  const layer = new Map();
+  const queue = [];
+  nodes.forEach(n => {
+    if (connected.has(n.id) && indeg.get(n.id) === 0) {
+      layer.set(n.id, 0);
+      queue.push(n.id);
+    }
+  });
+  // Kahn 拓撲：layer = 最長入路徑長度
+  const indegWork = new Map(indeg);
+  while (queue.length) {
+    const cur = queue.shift();
+    (children.get(cur) || []).forEach(next => {
+      layer.set(next, Math.max(layer.get(next) || 0, layer.get(cur) + 1));
+      indegWork.set(next, indegWork.get(next) - 1);
+      if (indegWork.get(next) === 0) queue.push(next);
+    });
+  }
+
+  const isolated = nodes.filter(n => !connected.has(n.id));
+  return { layer, isolated };
+}
+
+function renderGraph(data) {
+  const container = document.getElementById('graphContainer');
+  if (!data.nodes.length) {
+    container.innerHTML = '<div class="detail-empty">尚無文件</div>';
+    return;
+  }
+
+  const { layer, isolated } = computeLayers(data.nodes, data.edges);
+
+  // 依層分組
+  const maxLayer = Math.max(0, ...Array.from(layer.values()));
+  const byLayer = [];
+  for (let i = 0; i <= maxLayer; i++) byLayer.push([]);
+  data.nodes.forEach(n => {
+    if (layer.has(n.id)) byLayer[layer.get(n.id)].push(n);
+  });
+
+  // 版面參數
+  const NW = 200, NH = 48, GX = 280, GY = 70, PAD = 40;
+  const isoCol = isolated.length ? 1 : 0;
+  const cols = byLayer.length + isoCol;
+  const maxRows = Math.max(1, ...byLayer.map(l => l.length), isolated.length);
+  const width = PAD * 2 + cols * GX;
+  const height = PAD * 2 + maxRows * GY + 20;
+
+  // 節點座標
+  const pos = new Map();
+  byLayer.forEach((nodesInLayer, li) => {
+    nodesInLayer.forEach((n, i) => {
+      pos.set(n.id, { x: PAD + li * GX, y: PAD + i * GY });
+    });
+  });
+  isolated.forEach((n, i) => {
+    pos.set(n.id, { x: PAD + byLayer.length * GX, y: PAD + i * GY });
+  });
+
+  // 邊（貝茲曲線＋箭頭）
+  const edgeSvg = data.edges.map(e => {
+    const a = pos.get(e.from), b = pos.get(e.to);
+    if (!a || !b) return '';
+    const x1 = a.x + NW, y1 = a.y + NH / 2;
+    const x2 = b.x, y2 = b.y + NH / 2;
+    const mx = (x1 + x2) / 2;
+    const color = EDGE_COLORS[e.type] || '#94a3b8';
+    const marker = 'arrow-' + (e.type || 'references');
+    return `<path d="M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}"
+      fill="none" stroke="${color}" stroke-width="1.6" marker-end="url(#${marker})">
+      <title>${escapeHtml(e.from)} → ${escapeHtml(e.to)}（${escapeHtml(e.type)}）${e.description ? '：' + escapeHtml(e.description) : ''}</title>
+    </path>`;
+  }).join('');
+
+  // 節點
+  const truncate = (s, n) => s.length > n ? s.slice(0, n) + '…' : s;
+  const nodeSvg = data.nodes.map(n => {
+    const p = pos.get(n.id);
+    if (!p) return '';
+    const c = NODE_COLORS[n.status] || NODE_COLORS['草稿'];
+    return `<g class="graph-node" transform="translate(${p.x},${p.y})" onclick="gotoDoc('${escapeHtml(n.id)}')">
+      <rect width="${NW}" height="${NH}" rx="6" fill="${c.fill}" stroke="${c.stroke}" stroke-width="1.5"/>
+      <text x="10" y="19" font-size="11" font-family="SF Mono,Consolas,monospace" fill="${c.text}" font-weight="700">${escapeHtml(n.id)}</text>
+      <text x="10" y="36" font-size="12" fill="${c.text}">${escapeHtml(truncate(n.title || '', 14))}</text>
+      <title>${escapeHtml(n.id)}｜${escapeHtml(n.title)}（${escapeHtml(n.status)}／${escapeHtml(n.category)}）</title>
+    </g>`;
+  }).join('');
+
+  // 孤立節點欄標題
+  const isoLabel = isolated.length
+    ? `<text x="${PAD + byLayer.length * GX}" y="${PAD - 12}" font-size="11" fill="#9ca3af">未建立關聯</text>`
+    : '';
+
+  const markers = Object.entries(EDGE_COLORS).map(([type, color]) =>
+    `<marker id="arrow-${type}" viewBox="0 0 10 10" refX="9" refY="5"
+       markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+       <path d="M 0 0 L 10 5 L 0 10 z" fill="${color}"/>
+     </marker>`).join('');
+
+  container.innerHTML = `
+    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <defs>${markers}</defs>
+      ${isoLabel}
+      ${edgeSvg}
+      ${nodeSvg}
+    </svg>`;
+}
 </script>
 </body>
 </html>

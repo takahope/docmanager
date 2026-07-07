@@ -1,14 +1,40 @@
 // ============================================================
 // code.js — 核心業務邏輯
 // 文件 CRUD + Closure Table 關聯維護 + 前端 API
+// 權限檢查見 auth.js、異動紀錄見 audit.js
 // ============================================================
 
-// ── Web App 進入點 ────────────────────────────────────────────
+// ── Web App 進入點（白名單閘門）──────────────────────────────
 function doGet() {
+  let ctx;
+  try {
+    ctx = getUserContext();
+  } catch (e) {
+    // HR_SPREADSHEET_ID 未設定等組態錯誤 → 顯示設定指引而非白屏
+    return _renderMessagePage('SPREADSHEET_ID尚未完成設定', String(e.message || e) +
+      '<br><br>請管理員於「專案設定 → 指令碼資訊」設定 Script Properties。');
+  }
+
+  if (!ctx.isWhitelisted) {
+    return _renderMessagePage('無存取權限',
+      `您的登入信箱 <b>${ctx.email || '（無法取得）'}</b> 不在人員名單中。<br>` +
+      '如需使用本功能，請聯絡管理員。');
+  }
+
   return HtmlService.createHtmlOutputFromFile('index')
-    .setTitle('文件管理系統')
+    .setTitle('文件管理')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function _renderMessagePage(title, bodyHtml) {
+  const html = `<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8">
+    <style>body{font-family:"Noto Sans TC","Microsoft JhengHei",sans-serif;
+    display:flex;align-items:center;justify-content:center;min-height:90vh;background:#f5f6f8;color:#1f2937}
+    .box{background:#fff;border:1px solid #dde2e8;border-radius:8px;padding:32px 40px;max-width:480px;text-align:center}
+    h1{font-size:18px;margin-bottom:12px}p{font-size:14px;line-height:1.7;color:#6b7280}</style></head>
+    <body><div class="box"><h1>${title}</h1><p>${bodyHtml}</p></div></body></html>`;
+  return HtmlService.createHtmlOutput(html).setTitle('文件管理');
 }
 
 // ── 工具函式 ──────────────────────────────────────────────────
@@ -27,15 +53,19 @@ function _readDocs() {
   return rows.slice(1)
     .filter(r => r[DOC_COL.DOC_ID])
     .map(r => ({
-      doc_id:     r[DOC_COL.DOC_ID],
-      title:      r[DOC_COL.TITLE],
-      category:   r[DOC_COL.CATEGORY],
-      status:     r[DOC_COL.STATUS],
-      owner:      r[DOC_COL.OWNER],
-      owner_id:   r[DOC_COL.OWNER_ID],
-      updated_at: r[DOC_COL.UPDATED_AT],
-      version:    r[DOC_COL.VERSION],
-      drive_loc:  r[DOC_COL.GOOGLE_DRIVE_LOC],
+      doc_id:       r[DOC_COL.DOC_ID],
+      title:        r[DOC_COL.TITLE],
+      category:     r[DOC_COL.CATEGORY],
+      status:       r[DOC_COL.STATUS],
+      owner:        r[DOC_COL.OWNER],
+      owner_id:     r[DOC_COL.OWNER_ID],
+      updated_at:   r[DOC_COL.UPDATED_AT],
+      version:      r[DOC_COL.VERSION],
+      drive_loc:    r[DOC_COL.GOOGLE_DRIVE_LOC],
+      owner_email:  r[DOC_COL.OWNER_EMAIL] || '',
+      published_at: r[DOC_COL.PUBLISHED_AT] || '',
+      next_review:  r[DOC_COL.NEXT_REVIEW] || '',
+      review_cycle: r[DOC_COL.REVIEW_CYCLE] || '',
     }));
 }
 
@@ -58,25 +88,59 @@ function _now() {
   return Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy/MM/dd');
 }
 
+// 今天 + N 個月，回傳 yyyy/MM/dd 字串（下次審查日計算用）
+function _addMonthsFromToday(months) {
+  const d = new Date();
+  d.setMonth(d.getMonth() + months);
+  return Utilities.formatDate(d, 'Asia/Taipei', 'yyyy/MM/dd');
+}
+
+// 把文件物件轉成完整的一列（apiCreateDoc / apiUpdateDoc 共用）
+function _docToRow(doc) {
+  const row = new Array(DOC_COL_COUNT).fill('');
+  row[DOC_COL.DOC_ID]           = doc.doc_id;
+  row[DOC_COL.TITLE]            = doc.title || '';
+  row[DOC_COL.CATEGORY]         = doc.category || '';
+  row[DOC_COL.STATUS]           = doc.status || '草稿';
+  row[DOC_COL.OWNER]            = doc.owner || '';
+  row[DOC_COL.OWNER_ID]         = doc.owner_id || '';
+  row[DOC_COL.UPDATED_AT]       = _now();
+  row[DOC_COL.VERSION]          = doc.version || '0.1';
+  row[DOC_COL.GOOGLE_DRIVE_LOC] = doc.drive_loc || '';
+  row[DOC_COL.OWNER_EMAIL]      = doc.owner_email || '';
+  row[DOC_COL.PUBLISHED_AT]     = doc.published_at || '';
+  row[DOC_COL.NEXT_REVIEW]      = doc.next_review || '';
+  row[DOC_COL.REVIEW_CYCLE]     = doc.review_cycle || '';
+  return row;
+}
+
 // ============================================================
 // 前端 API：文件 CRUD
 // ============================================================
 
-// 取得所有文件（含選項清單，供前端初始化一次取完）
+// 取得所有文件（含選項清單與使用者情境，供前端初始化一次取完）
 function apiGetInitData() {
+  const ctx = getUserContext();
   return {
     docs: _readDocs(),
     statuses: DOC_STATUS,
     categories: DOC_CATEGORIES,
     relationTypes: RELATION_TYPES,
+    reviewCycles: REVIEW_CYCLES,
+    statusTransitions: STATUS_TRANSITIONS,
+    user: ctx,
+    // 負責人下拉選項：白名單即可看到（僅姓名與信箱，無其他個資）
+    hrPeople: ctx.isWhitelisted ? _getHrPeople() : [],
   };
 }
 
 // 新增文件（自動產生 doc_id + 寫入 self closure 記錄）
+// 白名單使用者皆可建立；未指定負責人信箱時預設為建立者本人。
 function apiCreateDoc(doc) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    const ctx = _assertWhitelisted();
     const sheet = _getSheet(SHEET_NAMES.DOCS);
 
     // 產生新 doc_id：掃描現有最大序號
@@ -88,70 +152,101 @@ function apiCreateDoc(doc) {
     });
     const newId = 'DOC-' + String(maxNum + 1).padStart(3, '0');
 
-    sheet.appendRow([
-      newId,
-      doc.title || '',
-      doc.category || '',
-      doc.status || '草稿',
-      doc.owner || '',
-      doc.owner_id || '',
-      _now(),
-      doc.version || '0.1',
-      doc.drive_loc || '',
-    ]);
+    const newDoc = Object.assign({}, doc, {
+      doc_id: newId,
+      status: doc.status || '草稿',
+      owner_email: doc.owner_email || ctx.email,
+      review_cycle: doc.review_cycle || DEFAULT_REVIEW_CYCLE,
+      published_at: '',
+      next_review: '',
+    });
+    sheet.appendRow(_docToRow(newDoc));
 
     // Closure Table：寫入自身記錄（depth=0）
     const clsSheet = _getSheet(SHEET_NAMES.CLOSURE);
     clsSheet.appendRow([newId, newId, 0, 'references', '自身']);
 
+    _logAudit('建立', newId, newDoc.version || '0.1', `建立文件「${newDoc.title || ''}」`);
     SpreadsheetApp.flush();
     return { success: true, doc_id: newId };
   } catch (e) {
-    return { success: false, error: String(e) };
+    return { success: false, error: String(e.message || e) };
   } finally {
     lock.releaseLock();
   }
 }
 
-// 更新文件（依 doc_id 定位列，更新欄位）
+// 更新文件（依 doc_id 定位列，整列寫回）
+// 狀態變更走 STATUS_TRANSITIONS 查表驗證；轉「已發布」自動填發布日與下次審查日。
 function apiUpdateDoc(doc) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    const ctx = _assertCanEditDoc(doc.doc_id);
+
     const sheet = _getSheet(SHEET_NAMES.DOCS);
     const rows = sheet.getDataRange().getDisplayValues();
     const idx = rows.findIndex(r => r[DOC_COL.DOC_ID] === doc.doc_id);
     if (idx < 1) return { success: false, error: '找不到文件：' + doc.doc_id };
 
-    const rowNum = idx + 1; // 1-based
-    sheet.getRange(rowNum, DOC_COL.TITLE + 1).setValue(doc.title);
-    sheet.getRange(rowNum, DOC_COL.CATEGORY + 1).setValue(doc.category);
-    sheet.getRange(rowNum, DOC_COL.STATUS + 1).setValue(doc.status);
-    sheet.getRange(rowNum, DOC_COL.OWNER + 1).setValue(doc.owner);
-    sheet.getRange(rowNum, DOC_COL.OWNER_ID + 1).setValue(doc.owner_id);
-    sheet.getRange(rowNum, DOC_COL.UPDATED_AT + 1).setValue(_now());
-    sheet.getRange(rowNum, DOC_COL.VERSION + 1).setValue(doc.version);
-    sheet.getRange(rowNum, DOC_COL.GOOGLE_DRIVE_LOC + 1).setValue(doc.drive_loc);
+    const oldDoc = _readDocs().find(d => d.doc_id === doc.doc_id);
+    const oldStatus = oldDoc.status;
+    const newStatus = doc.status || oldStatus;
+
+    // 狀態流轉驗證（Map 查表；同狀態不需檢查）
+    if (newStatus !== oldStatus) {
+      const allowed = STATUS_TRANSITIONS[oldStatus] || [];
+      if (!allowed.includes(newStatus)) {
+        return { success: false, error: `狀態不可由「${oldStatus}」轉為「${newStatus}」（允許：${allowed.join('、') || '無'}）` };
+      }
+      // 廢止文件復活僅限管理員
+      if (oldStatus === '已廢止' && !ctx.isAdmin) {
+        return { success: false, error: '「已廢止」文件僅限管理員恢復為草稿' };
+      }
+    }
+
+    // 發布日／下次審查日：預設沿用舊值；轉「已發布」時重算
+    const merged = Object.assign({}, doc, {
+      published_at: oldDoc.published_at,
+      next_review:  oldDoc.next_review,
+      status: newStatus,
+    });
+    if (newStatus === '已發布' && oldStatus !== '已發布') {
+      const cycle = parseInt(doc.review_cycle, 10) || DEFAULT_REVIEW_CYCLE;
+      merged.published_at = _now();
+      merged.next_review  = _addMonthsFromToday(cycle);
+    }
+
+    sheet.getRange(idx + 1, 1, 1, DOC_COL_COUNT).setValues([_docToRow(merged)]);
+
+    const action = (newStatus !== oldStatus) ? '狀態變更' : '更新';
+    const summary = (newStatus !== oldStatus)
+      ? `${oldStatus} → ${newStatus}` + (merged.published_at !== oldDoc.published_at ? `（發布日 ${merged.published_at}，下次審查 ${merged.next_review}）` : '')
+      : (_diffSummary(oldDoc, doc) || '（無欄位變更）');
+    _logAudit(action, doc.doc_id, doc.version || oldDoc.version, summary);
 
     SpreadsheetApp.flush();
-    return { success: true };
+    return { success: true, published_at: merged.published_at, next_review: merged.next_review };
   } catch (e) {
-    return { success: false, error: String(e) };
+    return { success: false, error: String(e.message || e) };
   } finally {
     lock.releaseLock();
   }
 }
 
-// 刪除文件（同步刪除閉包表中所有相關記錄）
+// 刪除文件（同步刪除閉包表中所有相關記錄）——不可逆，僅限管理員
 function apiDeleteDoc(docId) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    _assertAdmin();
+
     // 1. 刪除文件清單中的列
     const sheet = _getSheet(SHEET_NAMES.DOCS);
     const rows = sheet.getDataRange().getDisplayValues();
     const idx = rows.findIndex(r => r[DOC_COL.DOC_ID] === docId);
     if (idx < 1) return { success: false, error: '找不到文件：' + docId };
+    const title = rows[idx][DOC_COL.TITLE];
     sheet.deleteRow(idx + 1);
 
     // 2. 刪除閉包表中所有 ancestor 或 descendant 為此文件的列（由下往上刪）
@@ -164,10 +259,11 @@ function apiDeleteDoc(docId) {
       }
     }
 
+    _logAudit('刪除', docId, '', `刪除文件「${title}」（含所有關聯記錄）`);
     SpreadsheetApp.flush();
     return { success: true };
   } catch (e) {
-    return { success: false, error: String(e) };
+    return { success: false, error: String(e.message || e) };
   } finally {
     lock.releaseLock();
   }
@@ -227,10 +323,13 @@ function apiGetAncestors(docId) {
 //   3. 對 A 的每個祖先 X (depth=dX)：寫入 X → B (depth=dX+1)
 //   4. 對 B 的每個子孫 Y (depth=dY)：寫入 A → Y (depth=dY+1)
 //   5. 交叉：X → Y (depth = dX + 1 + dY)
+// 另：relation_type = supersedes 且目標為「已發布」→ 自動將目標標為「已廢止」
 function apiAddRelation(ancestorId, descendantId, relationType, description) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    _assertCanEditDoc(ancestorId);
+
     if (ancestorId === descendantId) {
       return { success: false, error: '不可關聯自身' };
     }
@@ -284,12 +383,33 @@ function apiAddRelation(ancestorId, descendantId, relationType, description) {
       const clsSheet = _getSheet(SHEET_NAMES.CLOSURE);
       clsSheet.getRange(clsSheet.getLastRow() + 1, 1, newRows.length, 5)
         .setValues(newRows);
-      SpreadsheetApp.flush();
     }
 
-    return { success: true, added: newRows.length };
+    _logAudit('關聯新增', ancestorId, '',
+      `${ancestorId} → ${descendantId}（${relationType || 'references'}）${desc ? '：' + desc : ''}`);
+
+    // supersedes 自動廢止：新版文件取代已發布的舊版 → 舊版標「已廢止」
+    let deprecated = null;
+    if (relationType === 'supersedes') {
+      const target = _readDocs().find(d => d.doc_id === descendantId);
+      if (target && target.status === '已發布') {
+        const sheet = _getSheet(SHEET_NAMES.DOCS);
+        const rows = sheet.getDataRange().getDisplayValues();
+        const idx = rows.findIndex(r => r[DOC_COL.DOC_ID] === descendantId);
+        if (idx >= 1) {
+          sheet.getRange(idx + 1, DOC_COL.STATUS + 1).setValue('已廢止');
+          sheet.getRange(idx + 1, DOC_COL.UPDATED_AT + 1).setValue(_now());
+          _logAudit('狀態變更', descendantId, target.version,
+            `已發布 → 已廢止（被 ${ancestorId} supersedes 自動廢止）`);
+          deprecated = descendantId;
+        }
+      }
+    }
+
+    SpreadsheetApp.flush();
+    return { success: true, added: newRows.length, deprecated: deprecated };
   } catch (e) {
-    return { success: false, error: String(e) };
+    return { success: false, error: String(e.message || e) };
   } finally {
     lock.releaseLock();
   }
@@ -302,6 +422,8 @@ function apiRemoveRelation(ancestorId, descendantId) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    _assertCanEditDoc(ancestorId);
+
     const closure = _readClosure();
 
     // 確認直接關聯存在
@@ -337,9 +459,11 @@ function apiRemoveRelation(ancestorId, descendantId) {
     // 從剩餘的 depth=1 邊重算受影響範圍的閉包
     _rebuildClosurePaths(Array.from(ancestorsOfA), Array.from(descendantsOfB));
 
+    _logAudit('關聯移除', ancestorId, '', `移除 ${ancestorId} → ${descendantId}（間接路徑已重算）`);
+
     return { success: true };
   } catch (e) {
-    return { success: false, error: String(e) };
+    return { success: false, error: String(e.message || e) };
   } finally {
     lock.releaseLock();
   }
