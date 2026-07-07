@@ -201,6 +201,12 @@
   }
   .graph-legend .lg { display: inline-flex; align-items: center; gap: 5px; }
   .graph-legend .lg .sw { width: 18px; height: 3px; border-radius: 2px; display: inline-block; }
+  .rel-help {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px; border-radius: 50%; border: 1px solid #9ca3af;
+    color: #6b7280; font-size: 10px; font-weight: 700; cursor: help; flex-shrink: 0;
+  }
+  .rel-help:hover { border-color: var(--primary-light); color: var(--primary-light); }
   .graph-scroll { overflow: auto; max-height: 75vh; }
   .graph-node { cursor: pointer; }
   .graph-node:hover rect { stroke-width: 2.5; }
@@ -359,13 +365,7 @@
         <span>文件關聯圖（僅顯示直接關聯）</span>
         <button class="btn-export" onclick="loadGraph(true)">↻ 重新整理</button>
       </div>
-      <div class="graph-legend">
-        <span class="lg"><span class="sw" style="background:#94a3b8"></span>references</span>
-        <span class="lg"><span class="sw" style="background:#dc2626"></span>supersedes</span>
-        <span class="lg"><span class="sw" style="background:#7c3aed"></span>derived_from</span>
-        <span class="lg"><span class="sw" style="background:#0891b2"></span>related</span>
-        <span style="margin-left:auto">節點顏色＝文件狀態；點擊節點跳至文件詳細</span>
-      </div>
+      <div class="graph-legend" id="graphLegend"></div>
       <div class="graph-scroll" id="graphContainer">
         <div class="detail-empty">載入中…</div>
       </div>
@@ -907,7 +907,7 @@ function renderDetail(docId, descendants, ancestors, history) {
         </span>
         <div class="rel-info">
           <div class="rel-title">${escapeHtml(r.doc_id)}｜${escapeHtml(r.title)}</div>
-          <div class="rel-sub">${statusBadge(r.status)} ${escapeHtml(r.relation_type)}</div>
+          <div class="rel-sub">${statusBadge(r.status)} ${escapeHtml(relationLabel(r.relation_type))}</div>
         </div>
         ${(r.depth === 1 && editable) ? `<button class="btn-del" onclick="removeRelation('${escapeHtml(docId)}','${escapeHtml(r.doc_id)}')">移除</button>` : ''}
       </div>`).join('');
@@ -1164,7 +1164,8 @@ function openRelModal(ancestorId) {
     .join('');
 
   const typeSel = document.getElementById('r_type');
-  typeSel.innerHTML = relationTypes.map(t => `<option>${escapeHtml(t)}</option>`).join('');
+  typeSel.innerHTML = relationTypes.map(t =>
+    `<option value="${escapeHtml(t)}">${escapeHtml(relationLabel(t))}</option>`).join('');
 
   document.getElementById('r_desc').value = '';
   openModalWithGuard('relModal');
@@ -1232,6 +1233,22 @@ const EDGE_COLORS = {
   derived_from: '#7c3aed',
   related:      '#0891b2',
 };
+// 關聯類型的繁體中文顯示名稱與滑鼠懸停說明（底層值仍為英文，寫入試算表與比對邏輯不變）
+const RELATION_TYPE_LABELS = {
+  references:   '引用',
+  supersedes:   '取代',
+  derived_from: '衍生自',
+  related:      '相關',
+};
+const RELATION_TYPE_DESC = {
+  references:   '本文件的內容或依據引用了目標文件',
+  supersedes:   '本文件取代目標文件；建立此關聯時，若目標文件為「已發布」會自動標為「已廢止」',
+  derived_from: '本文件是由目標文件衍生而來，例如子表單、附件範本',
+  related:      '兩份文件內容相關，但沒有明確的引用或取代關係',
+};
+function relationLabel(type) {
+  return RELATION_TYPE_LABELS[type] || type;
+}
 const NODE_COLORS = {
   '草稿':   { fill: '#fef3c7', stroke: '#d97706', text: '#92400e' },
   '審核中': { fill: '#dbeafe', stroke: '#2563eb', text: '#1e40af' },
@@ -1239,7 +1256,19 @@ const NODE_COLORS = {
   '已廢止': { fill: '#f3f4f6', stroke: '#9ca3af', text: '#6b7280' },
 };
 
+function renderGraphLegend() {
+  const items = Object.keys(EDGE_COLORS).map(type => `
+    <span class="lg">
+      <span class="sw" style="background:${EDGE_COLORS[type]}"></span>
+      ${escapeHtml(relationLabel(type))}
+      <span class="rel-help" title="${escapeHtml(RELATION_TYPE_DESC[type] || '')}">?</span>
+    </span>`).join('');
+  document.getElementById('graphLegend').innerHTML =
+    items + `<span style="margin-left:auto">節點顏色＝文件狀態；點擊節點跳至文件詳細</span>`;
+}
+
 function loadGraph(force) {
+  renderGraphLegend();
   if (force) graphCache = null;
   const container = document.getElementById('graphContainer');
   container.innerHTML = '<div class="detail-empty">載入中…</div>';
@@ -1340,7 +1369,7 @@ function renderGraph(data) {
     const marker = 'arrow-' + (e.type || 'references');
     return `<path d="M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}"
       fill="none" stroke="${color}" stroke-width="1.6" marker-end="url(#${marker})">
-      <title>${escapeHtml(e.from)} → ${escapeHtml(e.to)}（${escapeHtml(e.type)}）${e.description ? '：' + escapeHtml(e.description) : ''}</title>
+      <title>${escapeHtml(e.from)} → ${escapeHtml(e.to)}（${escapeHtml(relationLabel(e.type))}）${e.description ? '：' + escapeHtml(e.description) : ''}</title>
     </path>`;
   }).join('');
 
