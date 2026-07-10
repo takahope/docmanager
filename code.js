@@ -119,18 +119,37 @@ function _docToRow(doc) {
 // ============================================================
 
 // 取得所有文件（含選項清單與使用者情境，供前端初始化一次取完）
+// docs 僅回傳可見文件（透過 _getVisibleDocIds 過濾，防資訊洩漏）。
 function apiGetInitData() {
-  const ctx = getUserContext();
+  // 白名單閘門：與其他讀取 API 一致。避免已離職（不在 HR 名單）但仍掛在
+  // owner_email 的使用者，繞過 doGet 頁面直接呼叫本 API 取回文件與標籤全樹。
+  const ctx = _assertWhitelisted();
+  const visible = _getVisibleDocIds(ctx);
+  const docs = _readDocs().filter(d => visible.has(d.doc_id));
+
+  // 標籤全樹（資料夾樹需要名稱；僅 id/name/parent/sort，無機密）
+  const tags = _readTags().map(t => ({
+    tag_id: t.tag_id, name: t.name, parent_id: t.parent_id, sort: t.sort,
+  }));
+  // 文件標籤：僅回傳可見文件的貼標，避免經由標籤推知不可見文件存在
+  const docTags = _readDocTags().filter(dt => visible.has(dt.doc_id));
+  // 當前使用者被授權的標籤（前端資料夾樹用；管理員視全部可見不受此限）
+  const grantedTagIds = _readGrants()
+    .filter(g => g.email === String(ctx.email || '').toLowerCase())
+    .map(g => g.tag_id);
+
   return {
-    docs: _readDocs(),
+    docs: docs,
     statuses: DOC_STATUS,
     categories: DOC_CATEGORIES,
     relationTypes: RELATION_TYPES,
     reviewCycles: REVIEW_CYCLES,
     statusTransitions: STATUS_TRANSITIONS,
-    user: ctx,
+    user: Object.assign({}, ctx, { grantedTagIds: grantedTagIds }),
     // 負責人下拉選項：白名單即可看到（僅姓名與信箱，無其他個資）
     hrPeople: ctx.isWhitelisted ? _getHrPeople() : [],
+    tags: tags,
+    docTags: docTags,
   };
 }
 
@@ -165,6 +184,18 @@ function apiCreateDoc(doc) {
     // Closure Table：寫入自身記錄（depth=0）
     const clsSheet = _getSheet(SHEET_NAMES.CLOSURE);
     clsSheet.appendRow([newId, newId, 0, 'references', '自身']);
+
+    // 可選：建立時同時貼標（僅接受既有標籤）
+    const wantTags = (doc.tagIds || []).map(String).filter(Boolean);
+    if (wantTags.length > 0) {
+      const validTagIds = new Set(_readTags().map(t => t.tag_id));
+      const rows = wantTags.filter(t => validTagIds.has(t)).map(t => [newId, t]);
+      if (rows.length > 0) {
+        const dtSheet = _getSheet(SHEET_NAMES.DOC_TAGS);
+        dtSheet.getRange(dtSheet.getLastRow() + 1, 1, rows.length, DOCTAG_COL_COUNT)
+          .setValues(rows);
+      }
+    }
 
     _logAudit('建立', newId, newDoc.version || '0.1', `建立文件「${newDoc.title || ''}」`);
     SpreadsheetApp.flush();
@@ -259,7 +290,16 @@ function apiDeleteDoc(docId) {
       }
     }
 
-    _logAudit('刪除', docId, '', `刪除文件「${title}」（含所有關聯記錄）`);
+    // 3. 級聯清除「文件標籤」中此文件的貼標列（由下往上刪）
+    const dtSheet = _getSheet(SHEET_NAMES.DOC_TAGS);
+    const dtRows = dtSheet.getDataRange().getDisplayValues();
+    for (let i = dtRows.length - 1; i >= 1; i--) {
+      if (dtRows[i][DOCTAG_COL.DOC_ID] === docId) {
+        dtSheet.deleteRow(i + 1);
+      }
+    }
+
+    _logAudit('刪除', docId, '', `刪除文件「${title}」（含所有關聯與標籤記錄）`);
     SpreadsheetApp.flush();
     return { success: true };
   } catch (e) {
@@ -274,13 +314,17 @@ function apiDeleteDoc(docId) {
 // ============================================================
 
 // 查詢某文件的所有關聯（向下：我引用了誰）
+// 入口先驗證可見性，結果再過濾掉不可見的子孫（完全隱藏）。
 function apiGetDescendants(docId, maxDepth) {
+  const ctx = _assertCanViewDoc(docId);
+  const visible = _getVisibleDocIds(ctx);
   const closure = _readClosure();
   const docsMap = new Map(_readDocs().map(d => [d.doc_id, d]));
   const limit = maxDepth || 99;
 
   return closure
-    .filter(c => c.ancestor_id === docId && c.depth > 0 && c.depth <= limit)
+    .filter(c => c.ancestor_id === docId && c.depth > 0 && c.depth <= limit &&
+                 visible.has(c.descendant_id))
     .map(c => {
       const doc = docsMap.get(c.descendant_id);
       return {
@@ -297,12 +341,16 @@ function apiGetDescendants(docId, maxDepth) {
 }
 
 // 反查某文件被誰關聯（向上：誰引用了我）
+// 入口先驗證可見性，結果再過濾掉不可見的祖先（完全隱藏）。
 function apiGetAncestors(docId) {
+  const ctx = _assertCanViewDoc(docId);
+  const visible = _getVisibleDocIds(ctx);
   const closure = _readClosure();
   const docsMap = new Map(_readDocs().map(d => [d.doc_id, d]));
 
   return closure
-    .filter(c => c.descendant_id === docId && c.depth > 0)
+    .filter(c => c.descendant_id === docId && c.depth > 0 &&
+                 visible.has(c.ancestor_id))
     .map(c => {
       const doc = docsMap.get(c.ancestor_id);
       return {
@@ -333,6 +381,11 @@ function apiAddRelation(ancestorId, descendantId, relationType, description) {
     if (ancestorId === descendantId) {
       return { success: false, error: '不可關聯自身' };
     }
+
+    // 目標文件也必須可見，否則會形成「存在性 oracle」：回傳值可反推
+    // 不可見文件是否存在／是否已發布，且 supersedes 會越權廢止隱藏文件。
+    // 依計畫「不可見文件的關聯完全隱藏」，關聯對象一律需通過可見性檢查。
+    _assertCanViewDoc(descendantId);
 
     const closure = _readClosure();
 
@@ -522,20 +575,273 @@ function _rebuildClosurePaths(affectedAncestors, affectedDescendants) {
 }
 
 // 取得整體關聯圖資料（供前端畫關聯樹/網路圖）
+// nodes 與 edges 都先過可見集：不可見文件與其連線完全不出現。
 function apiGetGraphData() {
-  const docs = _readDocs();
+  const ctx = _assertWhitelisted();
+  const visible = _getVisibleDocIds(ctx);
+  const docs = _readDocs().filter(d => visible.has(d.doc_id));
   const closure = _readClosure();
 
   return {
     nodes: docs.map(d => ({
       id: d.doc_id, title: d.title, status: d.status, category: d.category,
     })),
-    // 只回傳 depth=1 的直接邊（圖形繪製只需要直接邊）
+    // 只回傳 depth=1 的直接邊，且兩端皆可見
     edges: closure
-      .filter(c => c.depth === 1)
+      .filter(c => c.depth === 1 &&
+                   visible.has(c.ancestor_id) && visible.has(c.descendant_id))
       .map(c => ({
         from: c.ancestor_id, to: c.descendant_id,
         type: c.relation_type, description: c.description,
       })),
   };
+}
+
+// ============================================================
+// 前端 API：標籤貼標 / 標籤樹管理 / 使用者授權（V3）
+// 全部走 LockService＋_assert*＋_logAudit＋SpreadsheetApp.flush()
+// ============================================================
+
+// 整組覆寫某文件的標籤（管理員或該文件負責人）。
+function apiSetDocTags(docId, tagIds) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    _assertCanEditDoc(docId);
+
+    // 僅接受既有標籤
+    const validTagIds = new Set(_readTags().map(t => t.tag_id));
+    const wanted = Array.from(new Set((tagIds || []).map(String).filter(Boolean)))
+      .filter(t => validTagIds.has(t));
+
+    const sheet = _getSheet(SHEET_NAMES.DOC_TAGS);
+    const rows = sheet.getDataRange().getDisplayValues();
+    // 刪除此文件既有貼標列（由下往上）
+    for (let i = rows.length - 1; i >= 1; i--) {
+      if (rows[i][DOCTAG_COL.DOC_ID] === docId) sheet.deleteRow(i + 1);
+    }
+    // 寫入新貼標
+    if (wanted.length > 0) {
+      const newRows = wanted.map(t => [docId, t]);
+      sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, DOCTAG_COL_COUNT)
+        .setValues(newRows);
+    }
+
+    _logAudit('貼標', docId, '', `設定標籤：${wanted.join(', ') || '（清空）'}`);
+    SpreadsheetApp.flush();
+    return { success: true, tagIds: wanted };
+  } catch (e) {
+    return { success: false, error: String(e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 新增標籤（僅管理員）。parentId 空＝根節點。
+function apiCreateTag(name, parentId) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    _assertAdmin();
+    const tagName = String(name || '').trim();
+    if (!tagName) return { success: false, error: '標籤名稱不可為空' };
+
+    const tags = _readTags();
+    const parent = parentId ? String(parentId) : '';
+    if (parent && !tags.some(t => t.tag_id === parent)) {
+      return { success: false, error: '找不到父標籤：' + parent };
+    }
+
+    // 產生新 tag_id
+    let maxNum = 0;
+    tags.forEach(t => {
+      const m = t.tag_id.match(/^TAG-(\d+)$/);
+      if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
+    });
+    const newId = 'TAG-' + String(maxNum + 1).padStart(3, '0');
+
+    // sort：同層最大 + 1
+    const maxSort = tags.filter(t => t.parent_id === parent)
+      .reduce((m, t) => Math.max(m, t.sort), 0);
+
+    const sheet = _getSheet(SHEET_NAMES.TAGS);
+    sheet.appendRow([newId, tagName, parent, maxSort + 1]);
+
+    _logAudit('標籤管理', '', '',
+      `新增標籤「${tagName}」(${newId})${parent ? ' 於 ' + parent : '（根節點）'}`);
+    SpreadsheetApp.flush();
+    return { success: true, tag_id: newId };
+  } catch (e) {
+    return { success: false, error: String(e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 標籤改名（僅管理員）。
+function apiRenameTag(tagId, name) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    _assertAdmin();
+    const tagName = String(name || '').trim();
+    if (!tagName) return { success: false, error: '標籤名稱不可為空' };
+
+    const sheet = _getSheet(SHEET_NAMES.TAGS);
+    const rows = sheet.getDataRange().getDisplayValues();
+    const idx = rows.findIndex(r => r[TAG_COL.TAG_ID] === tagId);
+    if (idx < 1) return { success: false, error: '找不到標籤：' + tagId };
+
+    const oldName = rows[idx][TAG_COL.NAME];
+    sheet.getRange(idx + 1, TAG_COL.NAME + 1).setValue(tagName);
+
+    _logAudit('標籤管理', '', '', `標籤改名：${oldName} → ${tagName}(${tagId})`);
+    SpreadsheetApp.flush();
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: String(e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 搬移標籤到新的父節點（僅管理員）；拒絕搬到自己的子孫底下（防環）。
+function apiMoveTag(tagId, newParentId) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    _assertAdmin();
+
+    const tags = _readTags();
+    if (!tags.some(t => t.tag_id === tagId)) {
+      return { success: false, error: '找不到標籤：' + tagId };
+    }
+    const parent = newParentId ? String(newParentId) : '';
+    if (parent) {
+      if (parent === tagId) {
+        return { success: false, error: '不可將標籤搬到自己底下' };
+      }
+      if (!tags.some(t => t.tag_id === parent)) {
+        return { success: false, error: '找不到父標籤：' + parent };
+      }
+      // 新父不可為自己的子孫（含自身）→ 會形成環
+      const subtree = _expandTagWithDescendants([tagId], tags);
+      if (subtree.has(parent)) {
+        return { success: false, error: '不可搬移到自己的子孫底下（會形成環）' };
+      }
+    }
+
+    const sheet = _getSheet(SHEET_NAMES.TAGS);
+    const rows = sheet.getDataRange().getDisplayValues();
+    const idx = rows.findIndex(r => r[TAG_COL.TAG_ID] === tagId);
+    if (idx < 1) return { success: false, error: '找不到標籤：' + tagId };
+    sheet.getRange(idx + 1, TAG_COL.PARENT_ID + 1).setValue(parent);
+
+    _logAudit('標籤管理', '', '', `搬移標籤 ${tagId} → 父 ${parent || '（根節點）'}`);
+    SpreadsheetApp.flush();
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: String(e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 刪除標籤（僅管理員）：連同整棵子樹一併刪除，
+// 並級聯清除「文件標籤」與「使用者授權」中對這些標籤的引用。
+function apiDeleteTag(tagId) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    _assertAdmin();
+
+    const tags = _readTags();
+    if (!tags.some(t => t.tag_id === tagId)) {
+      return { success: false, error: '找不到標籤：' + tagId };
+    }
+    // 待刪集合 = 此標籤 + 全部子孫（避免留下孤兒節點）
+    const toDelete = _expandTagWithDescendants([tagId], tags);
+
+    // 1. 刪除標籤主檔中的列
+    const tagSheet = _getSheet(SHEET_NAMES.TAGS);
+    const tagRows = tagSheet.getDataRange().getDisplayValues();
+    for (let i = tagRows.length - 1; i >= 1; i--) {
+      if (toDelete.has(tagRows[i][TAG_COL.TAG_ID])) tagSheet.deleteRow(i + 1);
+    }
+
+    // 2. 級聯清除文件標籤
+    const dtSheet = _getSheet(SHEET_NAMES.DOC_TAGS);
+    const dtRows = dtSheet.getDataRange().getDisplayValues();
+    for (let i = dtRows.length - 1; i >= 1; i--) {
+      if (toDelete.has(dtRows[i][DOCTAG_COL.TAG_ID])) dtSheet.deleteRow(i + 1);
+    }
+
+    // 3. 級聯清除使用者授權
+    const gSheet = _getSheet(SHEET_NAMES.GRANTS);
+    const gRows = gSheet.getDataRange().getDisplayValues();
+    for (let i = gRows.length - 1; i >= 1; i--) {
+      if (toDelete.has(gRows[i][GRANT_COL.TAG_ID])) gSheet.deleteRow(i + 1);
+    }
+
+    _logAudit('標籤管理', '', '',
+      `刪除標籤 ${tagId} 及其子樹（共 ${toDelete.size} 個），並清除相關貼標與授權`);
+    SpreadsheetApp.flush();
+    return { success: true, deleted: Array.from(toDelete) };
+  } catch (e) {
+    return { success: false, error: String(e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 整組覆寫某使用者的標籤授權（僅管理員）。
+function apiSetUserGrants(email, tagIds) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    _assertAdmin();
+
+    const target = String(email || '').trim().toLowerCase();
+    if (!target) return { success: false, error: '未指定使用者信箱' };
+
+    const validTagIds = new Set(_readTags().map(t => t.tag_id));
+    const wanted = Array.from(new Set((tagIds || []).map(String).filter(Boolean)))
+      .filter(t => validTagIds.has(t));
+
+    const sheet = _getSheet(SHEET_NAMES.GRANTS);
+    const rows = sheet.getDataRange().getDisplayValues();
+    // 刪除此使用者既有授權列（由下往上）
+    for (let i = rows.length - 1; i >= 1; i--) {
+      if (String(rows[i][GRANT_COL.EMAIL]).trim().toLowerCase() === target) {
+        sheet.deleteRow(i + 1);
+      }
+    }
+    // 寫入新授權
+    if (wanted.length > 0) {
+      const newRows = wanted.map(t => [target, t]);
+      sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, GRANT_COL_COUNT)
+        .setValues(newRows);
+    }
+
+    _logAudit('授權', '', '',
+      `設定 ${target} 授權標籤：${wanted.join(', ') || '（清空）'}`);
+    SpreadsheetApp.flush();
+    return { success: true, email: target, tagIds: wanted };
+  } catch (e) {
+    return { success: false, error: String(e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 取得所有使用者授權（僅管理員；供權限管理分頁）。
+// 回傳 [{email, tagIds:[...]}]。讀取型 API：失敗直接 throw 給前端失敗處理器。
+function apiGetAllGrants() {
+  _assertAdmin();
+  const map = {};
+  _readGrants().forEach(g => {
+    if (!map[g.email]) map[g.email] = [];
+    map[g.email].push(g.tag_id);
+  });
+  return Object.keys(map).map(email => ({ email: email, tagIds: map[email] }));
 }

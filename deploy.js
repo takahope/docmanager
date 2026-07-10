@@ -10,9 +10,23 @@ function deployAllSheets() {
   _deployDocSheet(ss);
   _deployClosureSheet(ss);
   _deployAuditSheet(ss);
+  _deployTagSheet(ss);
+  _deployDocTagSheet(ss);
+  _deployGrantSheet(ss);
 
   SpreadsheetApp.flush();
   Logger.log('✅ 所有工作表初始化完成');
+}
+
+// ── V2 → V3 遷移：新增標籤主檔 / 文件標籤 / 使用者授權三張表 ──
+// 冪等設計：表頭已存在就跳過，可重複執行。
+function migrateV3() {
+  const ss = SpreadsheetApp.openById(ENV.SPREADSHEET_ID);
+  _deployTagSheet(ss);
+  _deployDocTagSheet(ss);
+  _deployGrantSheet(ss);
+  SpreadsheetApp.flush();
+  Logger.log('✅ migrateV3 完成（標籤主檔 / 文件標籤 / 使用者授權）');
 }
 
 // ── V1 → V2 遷移：補文件清單 J–M 欄與異動紀錄表 ──────────────
@@ -196,6 +210,63 @@ function _deployAuditSheet(ss) {
   Logger.log(`✅ ${SHEET_NAMES.AUDIT} 初始化完成`);
 }
 
+// ── V3 三張表共用建立器（冪等）─────────────────────────────
+// 表頭第一格已等於預期值 → 視為已初始化，直接回傳（可重複執行）。
+function _deployV3Sheet(ss, name, headers, textColLetters, bg) {
+  let sheet = ss.getSheetByName(name);
+  if (sheet && sheet.getRange(1, 1).getValue() === headers[0]) {
+    Logger.log(`${name} 已初始化，跳過`);
+    return sheet;
+  }
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+    Logger.log(`建立工作表：${name}`);
+  }
+  const headerRange = sheet.getRange(1, 1, 1, headers.length);
+  headerRange.setValues([headers]);
+  headerRange.setFontWeight('bold');
+  headerRange.setBackground(bg);
+  headerRange.setFontColor('#ffffff');
+  sheet.setFrozenRows(1);
+  // 指定欄位強制文字（tag_id / doc_id / email / parent_id）避免被轉型
+  textColLetters.forEach(c => sheet.getRange(`${c}:${c}`).setNumberFormat('@'));
+  return sheet;
+}
+
+// ── 建立「標籤主檔」工作表 ─────────────────────────────────────
+function _deployTagSheet(ss) {
+  const sheet = _deployV3Sheet(
+    ss, SHEET_NAMES.TAGS,
+    ['tag_id', 'name', 'parent_id', 'sort'],
+    ['A', 'C'], '#4a2d5c');
+  sheet.getRange('D:D').setNumberFormat('0'); // sort 為整數
+  const colWidths = [120, 220, 120, 60];
+  colWidths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
+  Logger.log(`✅ ${SHEET_NAMES.TAGS} 初始化完成`);
+}
+
+// ── 建立「文件標籤」工作表 ─────────────────────────────────────
+function _deployDocTagSheet(ss) {
+  const sheet = _deployV3Sheet(
+    ss, SHEET_NAMES.DOC_TAGS,
+    ['doc_id', 'tag_id'],
+    ['A', 'B'], '#2d4a5c');
+  const colWidths = [140, 140];
+  colWidths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
+  Logger.log(`✅ ${SHEET_NAMES.DOC_TAGS} 初始化完成`);
+}
+
+// ── 建立「使用者授權」工作表 ───────────────────────────────────
+function _deployGrantSheet(ss) {
+  const sheet = _deployV3Sheet(
+    ss, SHEET_NAMES.GRANTS,
+    ['email', 'tag_id'],
+    ['A', 'B'], '#5c4a2d');
+  const colWidths = [260, 140];
+  colWidths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
+  Logger.log(`✅ ${SHEET_NAMES.GRANTS} 初始化完成`);
+}
+
 // ── 寫入測試資料（選用）──────────────────────────────────────
 function seedSampleData() {
   const ss = SpreadsheetApp.openById(ENV.SPREADSHEET_ID);
@@ -245,6 +316,32 @@ function seedSampleData() {
   ];
 
   clsSheet.getRange(2, 1, closures.length, closures[0].length).setValues(closures);
+
+  // ── V3 標籤範例（選用）：兩層標籤樹＋為部分文件貼標 ──────────
+  const tagSheet = ss.getSheetByName(SHEET_NAMES.TAGS);
+  const docTagSheet = ss.getSheetByName(SHEET_NAMES.DOC_TAGS);
+  if (tagSheet && docTagSheet && tagSheet.getLastRow() < 2) {
+    const tags = [
+      ['TAG-001', '資訊安全',   '',        1],
+      ['TAG-002', '政策層',     'TAG-001', 1],
+      ['TAG-003', '程序層',     'TAG-001', 2],
+      ['TAG-004', '表單',       '',        2],
+    ];
+    tagSheet.getRange(2, 1, tags.length, tags[0].length).setValues(tags);
+
+    const docTags = [
+      ['DOC-001', 'TAG-002'],
+      ['DOC-002', 'TAG-003'],
+      ['DOC-003', 'TAG-003'],
+      ['DOC-004', 'TAG-003'],
+      ['DOC-005', 'TAG-004'],
+      ['DOC-006', 'TAG-004'],
+      ['DOC-007', 'TAG-004'],
+    ];
+    docTagSheet.getRange(2, 1, docTags.length, docTags[0].length).setValues(docTags);
+    Logger.log('✅ 標籤範例寫入完成');
+  }
+
   SpreadsheetApp.flush();
   Logger.log('✅ 範例資料寫入完成');
 }

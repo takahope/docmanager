@@ -45,11 +45,25 @@ There is no local build or test command; syntax can be checked with `node --chec
 
 **Sheet "異動紀錄" (Audit trail)** — columns in `AUDIT_COL`: 時間, 操作者, 動作, doc_id, 版本, 變更摘要. Serves double duty as per-document version history (filter by doc_id).
 
+**Sheet "標籤主檔" (Tags)** — columns in `TAG_COL` (V3): `tag_id` (TAG-001 format, text-forced), `name`, `parent_id` (parent tag_id, empty = root; adjacency list — tag count is small, frontend builds the tree recursively, no closure table needed), `sort` (same-level ordering number). Tags double as **folders**.
+
+**Sheet "文件標籤" (Doc-Tags)** — columns in `DOCTAG_COL` (V3): `doc_id` | `tag_id` (many-to-many, one pair per row). A document with multiple tags appears in multiple folders without copying.
+
+**Sheet "使用者授權" (User Grants)** — columns in `GRANT_COL` (V3): `email` (lowercased) | `tag_id` (one grant per row). Grants are **not** HR-cached — they take effect immediately.
+
 ### Permission model (auth.js)
 
 - Whitelist source: HR master spreadsheet (Script Properties `HR_SPREADSHEET_ID`), sheet 人員主檔 (A email / B name / C status), filtered by **exclusion** (`EXCLUDED_HR_STATUS = ['離職']`) because Chinese status values are unreliable for exact matching. Cached 10 min.
 - Roles: admin (`ADMIN_EMAILS`) > document owner (`owner_email` === login email, can edit own docs/relations) > whitelisted user (read-only + can create docs, becoming owner) > outsider (doGet renders denial page).
 - Frontend `isAdmin` (real identity) vs `isAdminView` (view toggle) are separate; **every mutating API re-asserts permissions server-side** (IDOR protection). Delete is admin-only.
+
+### Tag-permission / visibility model (V3, auth.js)
+
+- **純標籤授權 (tag-only authorization)**: documents carry tags; admins grant tags to users; a user sees documents bearing a granted tag. No per-document grants.
+- **父含子繼承 (parent-includes-child inheritance)**: granting a parent tag makes the entire subtree of documents visible. `_expandTagWithDescendants(tagIds, allTags)` BFS-expands a grant set over `parent_id`.
+- **deny-by-default for untagged docs**: a document with no tags is visible only to admins and its owner. Before go-live, admins must tag existing documents or ordinary users see nothing.
+- `_getVisibleDocIds(ctx)` returns a `Set` and is the **single visibility authority**: (1) admin → all; (2) own `owner_email` docs → visible; (3) any doc tag ∈ the user's expanded grant set → visible; (4) untagged → rules 1 & 2 only. `_assertCanViewDoc(docId)` guards single-doc entry points (history, ancestor/descendant queries).
+- Tag-tree maintenance (create/rename/move/delete) is admin-only (`_assertAdmin`); tagging a document uses `_assertCanEditDoc` (admin + owner). Invisible documents are **fully hidden** — absent from the graph, ancestor/descendant queries, and detail pages.
 
 ### Status flow (env.js `STATUS_TRANSITIONS` + code.js `apiUpdateDoc`)
 
@@ -67,18 +81,21 @@ This is the core algorithmic complexity of the project — read these functions 
 
 `index.html` calls backend functions via `google.script.run.withSuccessHandler(...).withFailureHandler(...)` (every call must have a failure handler). Exposed API surface:
 
-- `apiGetInitData()` — docs + option lists + `statusTransitions` + `user` context + `hrPeople` (owner dropdown)
-- `apiCreateDoc(doc)` / `apiUpdateDoc(doc)` / `apiDeleteDoc(docId)` (admin only)
-- `apiGetDescendants(docId, maxDepth)` / `apiGetAncestors(docId)`
+- `apiGetInitData()` — docs (filtered to the visible set) + option lists + `statusTransitions` + `user` context (with `grantedTagIds`) + `hrPeople` (owner dropdown) + `tags` (all tags — folder tree needs names) + `docTags` (visible docs only)
+- `apiCreateDoc(doc)` (may carry `tagIds`) / `apiUpdateDoc(doc)` / `apiDeleteDoc(docId)` (admin only; cascades doc-tag rows)
+- `apiGetDescendants(docId, maxDepth)` / `apiGetAncestors(docId)` — `_assertCanViewDoc` at entry, results re-filtered to the visible set
 - `apiAddRelation(...)` (returns `deprecated` doc_id when supersedes auto-deprecates) / `apiRemoveRelation(...)`
-- `apiGetGraphData()` — nodes + direct edges; rendered as a pure-SVG layered DAG (longest-path layering — safe because closure table guarantees acyclicity)
-- `apiGetDocHistory(docId)` — audit rows for one document
+- `apiGetGraphData()` — nodes + direct edges, both filtered to the visible set; rendered as a pure-SVG layered DAG (longest-path layering — safe because closure table guarantees acyclicity)
+- `apiGetDocHistory(docId)` — audit rows for one document (`_assertCanViewDoc` at entry)
+- `apiSetDocTags(docId, tagIds)` (`_assertCanEditDoc`, overwrites the doc's tag rows) — V3
+- `apiCreateTag(name, parentId)` / `apiRenameTag(tagId, name)` / `apiMoveTag(tagId, newParentId)` (cycle-checked) / `apiDeleteTag(tagId)` (cascades doc-tag + grant rows) — admin only, V3
+- `apiSetUserGrants(email, tagIds)` / `apiGetAllGrants()` — admin only, V3
 
 Frontend conventions: dashboard stats are computed **client-side** from the already-loaded docs (no extra API); saves are optimistic (local state updated from inputs, no full reload); CSV export is built client-side with a `﻿` BOM.
 
 ## Established Best Practices (must follow)
 
-- **Never hardcode column indices** (e.g. `row[8]`) — always use `DOC_COL` / `CLS_COL` / `AUDIT_COL` from `env.js`.
+- **Never hardcode column indices** (e.g. `row[8]`) — always use `DOC_COL` / `CLS_COL` / `AUDIT_COL` / `TAG_COL` / `DOCTAG_COL` / `GRANT_COL` from `env.js`.
 - Call `SpreadsheetApp.flush()` after writes.
 - `doc_id`, `owner_ID`, and the date/email columns (J–L) must be forced to text format (`@`) to avoid coercion/serialization issues.
 - Use `getDisplayValues()` when reading dates to avoid serialization to `null`.
@@ -89,3 +106,4 @@ Frontend conventions: dashboard stats are computed **client-side** from the alre
 - Search/filter inputs use debounce **and** composition-event guards (注音 IME); re-rendering must not rebuild the input node.
 - Modals never close on backdrop click; dirty forms confirm before closing.
 - Secrets/IDs live in Script Properties (`PROP_KEYS`), never in committed code.
+- `_getVisibleDocIds` (auth.js) is the **single visibility authority** — every read API that returns docs/nodes/history must filter through it (or `_assertCanViewDoc` at a single-doc entry point); no API may bypass it and return docs directly.

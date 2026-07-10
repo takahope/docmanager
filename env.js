@@ -35,6 +35,9 @@ const SHEET_NAMES = {
   DOCS:     '文件清單',
   CLOSURE:  '文件關聯',
   AUDIT:    '異動紀錄',
+  TAGS:     '標籤主檔',   // V3：標籤樹（adjacency list）
+  DOC_TAGS: '文件標籤',   // V3：文件↔標籤多對多
+  GRANTS:   '使用者授權', // V3：使用者↔標籤授權
 };
 
 // ── 文件清單欄位索引（0-based，對應 getValues() 陣列）────────
@@ -74,6 +77,32 @@ const CLS_COL = {
   RELATION_TYPE:  3,  // D: relation_type
   DESCRIPTION:    4,  // E: 說明
 };
+
+// ── 標籤主檔欄位索引（0-based）（V3）────────────────────────
+// adjacency list：parent_id 空＝根節點；標籤數量小，前端遞迴建樹。
+const TAG_COL = {
+  TAG_ID:    0,  // A: tag_id（TAG-001 格式，文字格式）
+  NAME:      1,  // B: name（標籤名稱）
+  PARENT_ID: 2,  // C: parent_id（父標籤 tag_id，空＝根）
+  SORT:      3,  // D: sort（同層排序）
+};
+const TAG_COL_COUNT = 4;
+
+// ── 文件標籤欄位索引（0-based）（V3）────────────────────────
+// 多對多，一列一組 (doc_id, tag_id)。
+const DOCTAG_COL = {
+  DOC_ID: 0,  // A: doc_id
+  TAG_ID: 1,  // B: tag_id
+};
+const DOCTAG_COL_COUNT = 2;
+
+// ── 使用者授權欄位索引（0-based）（V3）──────────────────────
+// 純標籤授權，一列一組 (email, tag_id)；email 小寫。
+const GRANT_COL = {
+  EMAIL:  0,  // A: email（小寫）
+  TAG_ID: 1,  // B: tag_id
+};
+const GRANT_COL_COUNT = 2;
 
 // ── 文件狀態選項 ──────────────────────────────────────────────
 const DOC_STATUS = ['草稿', '審核中', '已發布', '已廢止'];

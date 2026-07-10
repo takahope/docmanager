@@ -285,9 +285,104 @@
   }
   #loading.hide { display: none; }
 
+  /* ── 資料夾樹側欄（文件清單分頁）── */
+  .panel-folders { flex: 0 0 210px; min-width: 190px; }
+  .folder-tree { padding: 6px; }
+  .folder-node {
+    display: flex; align-items: center; gap: 4px; padding: 5px 6px;
+    border-radius: 6px; cursor: pointer; font-size: 13px; user-select: none;
+  }
+  .folder-node:hover { background: #f0f4f8; }
+  .folder-node.active { background: #e3edf7; color: var(--primary); font-weight: 600; }
+  .folder-node .fn-toggle {
+    width: 14px; flex-shrink: 0; text-align: center; color: var(--text-muted);
+    font-size: 10px; cursor: pointer;
+  }
+  .folder-node .fn-icon { flex-shrink: 0; }
+  .folder-node .fn-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .folder-node .fn-count {
+    flex-shrink: 0; font-size: 11px; color: var(--text-muted);
+    font-family: "SF Mono", Consolas, monospace;
+  }
+  .folder-node.active .fn-count { color: var(--primary-light); }
+  .folder-sep { height: 1px; background: var(--border); margin: 6px 4px; }
+
+  /* ── 標籤 chip ── */
+  .tag-chip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px;
+    border-radius: 999px; font-size: 12px; font-weight: 600;
+    background: #eef2f7; color: var(--primary); white-space: nowrap;
+  }
+  .tag-chip .chip-x {
+    cursor: pointer; border: none; background: none; color: var(--primary-light);
+    font-size: 13px; line-height: 1; padding: 0; margin-left: 1px;
+  }
+  .tag-chip .chip-x:hover { color: var(--danger); }
+
+  /* ── 多選下拉＋標籤（modal 內，inline 展開避免裁切）── */
+  .ms-chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 4px; margin-bottom: 6px; }
+  .ms-chips .ms-empty { font-size: 12px; color: var(--text-muted); }
+  .ms-add {
+    padding: 6px 12px; border: 1px dashed var(--border); border-radius: var(--radius);
+    background: #fff; cursor: pointer; font-size: 13px; color: var(--primary);
+  }
+  .ms-add:hover { background: #f0f4f8; }
+  .ms-panel {
+    margin-top: 6px; border: 1px solid var(--border); border-radius: var(--radius);
+    background: #fafbfc; padding: 8px;
+  }
+  .ms-panel[hidden] { display: none; }
+  .ms-panel input.ms-filter {
+    width: 100%; padding: 6px 9px; border: 1px solid var(--border);
+    border-radius: var(--radius); font-size: 13px; margin-bottom: 6px;
+  }
+  .ms-actions { display: flex; gap: 8px; margin-bottom: 6px; }
+  .ms-actions button {
+    font-size: 12px; padding: 3px 10px; border: 1px solid var(--border);
+    background: #fff; border-radius: var(--radius); cursor: pointer;
+  }
+  .ms-actions button:hover { background: #f0f4f8; }
+  .ms-list { max-height: 200px; overflow-y: auto; }
+  .ms-opt {
+    display: flex; align-items: center; gap: 6px; padding: 4px 2px;
+    font-size: 13px; cursor: pointer; border-radius: 4px;
+  }
+  .ms-opt:hover { background: #eef2f7; }
+  .ms-opt input { width: auto; margin: 0; }
+  .ms-opt.hidden { display: none; }
+
+  /* ── 權限管理分頁 ── */
+  .admin-cols { display: flex; gap: 16px; align-items: flex-start; }
+  .admin-cols > .card { flex: 1; min-width: 0; }
+  .tag-mgr-node {
+    display: flex; align-items: center; gap: 6px; padding: 6px 6px;
+    border-radius: 6px; font-size: 13px;
+  }
+  .tag-mgr-node:hover { background: #f0f4f8; }
+  .tag-mgr-node .tm-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tag-mgr-node .tm-count { font-size: 11px; color: var(--text-muted); font-family: "SF Mono", Consolas, monospace; }
+  .tag-mgr-node .tm-acts { display: flex; gap: 2px; flex-shrink: 0; }
+  .tag-mgr-node .tm-acts button {
+    border: none; background: none; cursor: pointer; font-size: 12px;
+    color: var(--text-muted); padding: 2px 5px; border-radius: 4px;
+  }
+  .tag-mgr-node .tm-acts button:hover { background: #e3edf7; color: var(--primary); }
+  .tag-mgr-node .tm-acts button.del:hover { color: var(--danger); background: #fee2e2; }
+  .grant-opt {
+    display: flex; align-items: center; gap: 6px; padding: 5px 2px; font-size: 13px;
+  }
+  .grant-opt input { width: auto; margin: 0; }
+  .grant-opt .inherited-tag {
+    font-size: 11px; color: #059669; background: #d1fae5;
+    padding: 1px 7px; border-radius: 999px; font-weight: 600;
+  }
+  .grant-hint { color: var(--text-muted); font-size: 12px; padding: 8px 2px; }
+
   @media (max-width: 900px) {
     .container { flex-direction: column; }
     .panel-detail { min-width: 0; }
+    .panel-folders { flex: none; }
+    .admin-cols { flex-direction: column; }
   }
 </style>
 </head>
@@ -307,6 +402,7 @@
   <button id="tabBtn-dash" class="active" onclick="switchTab('dash')">儀表板</button>
   <button id="tabBtn-list" onclick="switchTab('list')">文件清單</button>
   <button id="tabBtn-graph" onclick="switchTab('graph')">關聯圖</button>
+  <button id="tabBtn-admin" onclick="switchTab('admin')" style="display:none">權限管理</button>
 </nav>
 
 <!-- ═══ 頁籤 1：儀表板 ═══ -->
@@ -323,7 +419,15 @@
 <!-- ═══ 頁籤 2：文件清單 ═══ -->
 <div class="tab-page" id="tabPage-list">
   <div class="container">
-    <!-- 左側：文件清單 -->
+    <!-- 左側：資料夾樹 -->
+    <div class="panel-folders">
+      <div class="card">
+        <div class="card-header">🗂 資料夾</div>
+        <div class="folder-tree" id="folderTree"></div>
+      </div>
+    </div>
+
+    <!-- 中間：文件清單 -->
     <div class="panel-list">
       <div class="card">
         <div class="toolbar">
@@ -373,6 +477,65 @@
   </div>
 </div>
 
+<!-- ═══ 頁籤 4：權限管理（僅管理員）═══ -->
+<div class="tab-page" id="tabPage-admin">
+  <div class="graph-wrap">
+    <div class="admin-cols">
+      <!-- 左：標籤樹管理 -->
+      <div class="card">
+        <div class="card-header">
+          <span>🏷 標籤樹管理</span>
+          <button class="btn-export" onclick="openTagModal('create','')">＋ 新增根標籤</button>
+        </div>
+        <div class="card-body" id="tagMgrTree"></div>
+      </div>
+      <!-- 右：使用者授權 -->
+      <div class="card">
+        <div class="card-header"><span>🔑 使用者授權</span></div>
+        <div class="card-body">
+          <div class="form-group">
+            <label>選擇使用者</label>
+            <select id="grantUserSelect" onchange="onGrantUserChange()">
+              <option value="">— 選擇人員 —</option>
+            </select>
+          </div>
+          <div class="field-hint" style="margin-bottom:8px">勾選標籤即授予該使用者可見；授予父標籤時整棵子樹自動繼承。</div>
+          <div id="grantTree"><div class="grant-hint">請先選擇一位使用者。</div></div>
+          <div class="detail-actions" id="grantSaveWrap" style="display:none">
+            <button class="btn-primary" onclick="saveGrants()">儲存授權</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 標籤新增/改名/搬移 Modal -->
+<div class="modal-backdrop" id="tagModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span id="tagModalTitle">標籤</span>
+      <button class="btn-x" onclick="tryCloseModal('tagModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="tm_mode">
+      <input type="hidden" id="tm_tag_id">
+      <div class="form-group" id="tm_name_group">
+        <label>標籤名稱 *</label>
+        <input id="tm_name" placeholder="例如：人事制度">
+      </div>
+      <div class="form-group" id="tm_parent_group">
+        <label>上層標籤</label>
+        <select id="tm_parent"></select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button onclick="tryCloseModal('tagModal')">取消</button>
+      <button class="btn-primary" onclick="saveTag()">儲存</button>
+    </div>
+  </div>
+</div>
+
 <!-- 新增/編輯文件 Modal -->
 <div class="modal-backdrop" id="docModal">
   <div class="modal">
@@ -404,6 +567,22 @@
         <div class="form-group"><label>審查週期（月）</label><select id="f_review_cycle"></select></div>
       </div>
       <div class="form-group"><label>Google Drive 位置</label><input id="f_drive_loc" placeholder="https://drive.google.com/..."></div>
+
+      <div class="form-group" id="tagFieldGroup">
+        <label>標籤 <span id="tagSelCount" class="field-hint" style="display:inline"></span></label>
+        <div class="ms-chips" id="tagChips"></div>
+        <button type="button" class="ms-add" id="tagAddBtn" onclick="toggleTagPanel()">＋ 選擇標籤</button>
+        <div class="ms-panel" id="tagPanel" hidden>
+          <input type="text" class="ms-filter" id="tagFilter" placeholder="篩選標籤…">
+          <div class="ms-actions">
+            <button type="button" onclick="tagSelectAll()">全選</button>
+            <button type="button" onclick="tagClearAll()">清除</button>
+          </div>
+          <div class="ms-list" id="tagCheckList"></div>
+        </div>
+        <div class="field-hint" id="tagReadonlyHint" style="display:none">僅管理員或文件負責人可修改標籤</div>
+        <input type="hidden" id="f_tagids">
+      </div>
     </div>
     <div class="modal-footer">
       <button onclick="tryCloseModal('docModal')">取消</button>
@@ -470,10 +649,27 @@ let relationTypes = [];
 let reviewCycles = [];
 let statusTransitions = {};
 let hrPeople = [];
-let currentUser = { email: '', name: '', isAdmin: false, isWhitelisted: false };
+let currentUser = { email: '', name: '', isAdmin: false, isWhitelisted: false, grantedTagIds: [] };
 let isAdminView = false;   // 視角切換（UI 用）；權限判定一律以後端真實身分為準
 let selectedDocId = null;
 let graphCache = null;
+
+// ── V3 標籤／資料夾／授權狀態 ──────────────────────────────
+let tags = [];            // [{tag_id, name, parent_id, sort}]（全部標籤）
+let docTags = [];         // [{doc_id, tag_id}]（僅可見文件）
+let tagById = {};         // tag_id -> tag
+let tagChildren = {};     // parent_id('' 為根) -> [tag,...]（依 sort 排序）
+let docTagIds = {};       // doc_id -> [tag_id,...]
+let selectedFolder = { type: 'all' };  // {type:'all'} | {type:'untagged'} | {type:'tag', id}
+let collapsedFolders = {};             // tag_id -> true（資料夾樹收合狀態）
+let allGrantsCache = null;             // {email(lower): [tag_id,...]}（管理員授權面板用）
+// 標籤多選（文件 modal）狀態
+let modalTagIds = [];
+let modalTagIdsOriginal = [];
+let modalTagEditable = false;
+let isTagFilterComposing = false;
+// 使用者授權面板：目前編輯中使用者的勾選集合
+let grantChecked = {};    // tag_id -> true
 
 // Modal dirty 防護：開啟時記錄表單快照，關閉前比對
 let modalSnapshots = {};
@@ -485,6 +681,12 @@ let isComposing = false;
 function escapeHtml(str) {
   return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+// 僅放行 http/https 連結；擋掉 javascript: 等可執行 scheme（防 XSS）。
+// 回傳空字串代表不可信 → 呼叫端應退回純文字而非 <a>。
+function safeUrl(url) {
+  const s = String(url ?? '').trim();
+  return /^https?:\/\//i.test(s) ? s : '';
 }
 function showToast(msg) {
   const t = document.getElementById('toast');
@@ -577,11 +779,16 @@ window.addEventListener('DOMContentLoaded', () => {
       reviewCycles = data.reviewCycles || [6, 12, 24, 36];
       statusTransitions = data.statusTransitions || {};
       currentUser = data.user || currentUser;
+      if (!Array.isArray(currentUser.grantedTagIds)) currentUser.grantedTagIds = [];
       hrPeople = data.hrPeople || [];
+      tags = data.tags || [];
+      docTags = data.docTags || [];
+      rebuildTagIndexes();
       isAdminView = currentUser.isAdmin; // 管理員預設用管理視角
 
       renderUserInfo();
       initFilters();
+      renderFolderTree();
       renderTable();
       renderDashboard();
       progress.finish();
@@ -603,6 +810,15 @@ window.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('filterCategory').addEventListener('change', renderTable);
   document.getElementById('filterStatus').addEventListener('change', renderTable);
+
+  // 標籤多選面板的即時篩選框：擋注音組字，且只更新顯示、不重建節點
+  const tagFilter = document.getElementById('tagFilter');
+  tagFilter.addEventListener('compositionstart', () => { isTagFilterComposing = true; });
+  tagFilter.addEventListener('compositionend', () => { isTagFilterComposing = false; applyTagFilter(); });
+  tagFilter.addEventListener('input', () => { if (!isTagFilterComposing) applyTagFilter(); });
+  tagFilter.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.isComposing || e.keyCode === 229)) e.preventDefault();
+  });
 });
 
 function renderUserInfo() {
@@ -619,6 +835,9 @@ function renderUserInfo() {
 
   // 新增文件：白名單使用者皆可
   document.getElementById('btnNewDoc').style.display = currentUser.isWhitelisted ? '' : 'none';
+
+  // 權限管理分頁：僅真實管理員（不受視角切換影響）可見
+  document.getElementById('tabBtn-admin').style.display = currentUser.isAdmin ? '' : 'none';
 }
 
 function toggleAdminView() {
@@ -645,15 +864,255 @@ function initFilters() {
 }
 
 // ============================================================
+// 標籤索引（由 tags / docTags 建立查詢結構）
+// ============================================================
+function rebuildTagIndexes() {
+  tagById = {};
+  tagChildren = {};
+  docTagIds = {};
+  (tags || []).forEach(t => {
+    tagById[t.tag_id] = t;
+    const pid = t.parent_id || '';
+    (tagChildren[pid] = tagChildren[pid] || []).push(t);
+  });
+  Object.keys(tagChildren).forEach(pid => {
+    tagChildren[pid].sort((a, b) =>
+      (Number(a.sort) || 0) - (Number(b.sort) || 0) ||
+      String(a.name).localeCompare(String(b.name)));
+  });
+  (docTags || []).forEach(dt => {
+    (docTagIds[dt.doc_id] = docTagIds[dt.doc_id] || []).push(dt.tag_id);
+  });
+}
+
+// tagId 的整棵子樹（含自身）tag_id 集合
+function tagSubtreeIds(tagId) {
+  const set = new Set();
+  const stack = [tagId];
+  while (stack.length) {
+    const id = stack.pop();
+    if (!id || set.has(id) || !tagById[id]) continue;
+    set.add(id);
+    (tagChildren[id] || []).forEach(c => stack.push(c.tag_id));
+  }
+  return set;
+}
+
+// 建立「每個標籤節點（含子樹上捲）對應的可見文件 doc_id 集合」
+function computeFolderCounts() {
+  const countSet = {}; // tag_id -> Set(doc_id)
+  allDocs.forEach(d => {
+    const seen = new Set();
+    (docTagIds[d.doc_id] || []).forEach(tid => {
+      let cur = tid;
+      while (cur && tagById[cur]) {
+        if (!seen.has(cur)) {
+          (countSet[cur] = countSet[cur] || new Set()).add(d.doc_id);
+          seen.add(cur);
+        }
+        cur = tagById[cur].parent_id || '';
+      }
+    });
+  });
+  return countSet;
+}
+
+// ============================================================
+// 資料夾樹側欄（文件清單分頁）
+// ============================================================
+function renderFolderTree() {
+  const host = document.getElementById('folderTree');
+  if (!host) return;
+  // 若選中的標籤資料夾已被刪除，退回「全部」
+  if (selectedFolder.type === 'tag' && !tagById[selectedFolder.id]) selectedFolder = { type: 'all' };
+  const counts = computeFolderCounts();
+  const untaggedCount = allDocs.filter(d => !(docTagIds[d.doc_id] || []).length).length;
+
+  const activeAll = selectedFolder.type === 'all' ? 'active' : '';
+  const activeUn = selectedFolder.type === 'untagged' ? 'active' : '';
+  let html = `
+    <div class="folder-node ${activeAll}" onclick="selectFolder('all','')">
+      <span class="fn-toggle"></span><span class="fn-icon">📁</span>
+      <span class="fn-name">全部</span><span class="fn-count">${allDocs.length}</span>
+    </div>`;
+
+  const roots = tagChildren[''] || [];
+  roots.forEach(t => { html += folderNodeHtml(t, 0, counts); });
+
+  html += `<div class="folder-sep"></div>
+    <div class="folder-node ${activeUn}" onclick="selectFolder('untagged','')">
+      <span class="fn-toggle"></span><span class="fn-icon">🗒</span>
+      <span class="fn-name">未分類</span><span class="fn-count">${untaggedCount}</span>
+    </div>`;
+
+  host.innerHTML = html;
+}
+
+function folderNodeHtml(tag, depth, counts) {
+  const kids = tagChildren[tag.tag_id] || [];
+  const hasKids = kids.length > 0;
+  const collapsed = !!collapsedFolders[tag.tag_id];
+  const active = (selectedFolder.type === 'tag' && selectedFolder.id === tag.tag_id) ? 'active' : '';
+  const cnt = counts[tag.tag_id] ? counts[tag.tag_id].size : 0;
+  const toggle = hasKids
+    ? `<span class="fn-toggle" onclick="event.stopPropagation();toggleFolder('${escapeHtml(tag.tag_id)}')">${collapsed ? '▶' : '▼'}</span>`
+    : `<span class="fn-toggle"></span>`;
+  let html = `
+    <div class="folder-node ${active}" style="padding-left:${6 + depth * 14}px"
+         onclick="selectFolder('tag','${escapeHtml(tag.tag_id)}')">
+      ${toggle}<span class="fn-icon">📂</span>
+      <span class="fn-name">${escapeHtml(tag.name)}</span>
+      <span class="fn-count">${cnt}</span>
+    </div>`;
+  if (hasKids && !collapsed) {
+    kids.forEach(c => { html += folderNodeHtml(c, depth + 1, counts); });
+  }
+  return html;
+}
+
+function toggleFolder(tagId) {
+  collapsedFolders[tagId] = !collapsedFolders[tagId];
+  renderFolderTree();
+}
+
+function selectFolder(type, id) {
+  selectedFolder = (type === 'tag') ? { type: 'tag', id: id } : { type: type };
+  renderFolderTree();
+  renderTable();
+}
+
+// 詳情頁：文件標籤 chip（唯讀）
+function docTagChipsHtml(docId) {
+  const ids = docTagIds[docId] || [];
+  if (!ids.length) return '<span class="ms-empty">未貼標籤</span>';
+  return ids.map(tid => {
+    const t = tagById[tid];
+    return `<span class="tag-chip">${escapeHtml(t ? t.name : tid)}</span>`;
+  }).join('');
+}
+
+// 本地更新某文件的標籤集合（樂觀更新）
+function setLocalDocTags(docId, tagIds) {
+  docTags = docTags.filter(dt => dt.doc_id !== docId);
+  (tagIds || []).forEach(tid => docTags.push({ doc_id: docId, tag_id: tid }));
+  rebuildTagIndexes();
+}
+
+// ============================================================
+// 文件 modal：標籤多選（下拉＋chips，inline 展開避免裁切）
+// ============================================================
+function initModalTagSelect(docId, isEdit) {
+  modalTagEditable = isEdit
+    ? canEditDoc(allDocs.find(d => d.doc_id === docId) || {})
+    : currentUser.isWhitelisted;              // 新建者即負責人，可貼標
+  modalTagIdsOriginal = isEdit ? (docTagIds[docId] || []).slice() : [];
+  modalTagIds = modalTagIdsOriginal.slice();
+
+  document.getElementById('tagPanel').hidden = true;
+  document.getElementById('tagFilter').value = '';
+  document.getElementById('tagAddBtn').style.display = modalTagEditable ? '' : 'none';
+  document.getElementById('tagReadonlyHint').style.display = modalTagEditable ? 'none' : '';
+  renderModalTagChips();
+}
+
+function renderModalTagChips() {
+  const host = document.getElementById('tagChips');
+  if (!modalTagIds.length) {
+    host.innerHTML = '<span class="ms-empty">尚未選擇標籤</span>';
+  } else {
+    host.innerHTML = modalTagIds.map(tid => {
+      const t = tagById[tid];
+      const x = modalTagEditable
+        ? `<button type="button" class="chip-x" onclick="removeModalTag('${escapeHtml(tid)}')">✕</button>`
+        : '';
+      return `<span class="tag-chip">${escapeHtml(t ? t.name : tid)}${x}</span>`;
+    }).join('');
+  }
+  document.getElementById('tagSelCount').textContent =
+    modalTagIds.length ? `（已選 ${modalTagIds.length} 項）` : '';
+  // 隱藏欄位讓既有 dirty-guard（snapshotModal 讀 input）能偵測標籤變更
+  document.getElementById('f_tagids').value = modalTagIds.slice().sort().join(',');
+}
+
+function toggleTagPanel() {
+  const panel = document.getElementById('tagPanel');
+  panel.hidden = !panel.hidden;
+  if (!panel.hidden) renderModalTagCheckList();
+}
+
+function renderModalTagCheckList() {
+  const host = document.getElementById('tagCheckList');
+  const kw = document.getElementById('tagFilter').value.trim().toLowerCase();
+  const rows = [];
+  const walk = (tag, depth) => {
+    const checked = modalTagIds.indexOf(tag.tag_id) >= 0 ? 'checked' : '';
+    const hide = kw && tag.name.toLowerCase().indexOf(kw) < 0 ? 'hidden-self' : '';
+    rows.push(
+      `<label class="ms-opt" data-name="${escapeHtml(tag.name.toLowerCase())}" data-hide="${hide}"
+              style="padding-left:${2 + depth * 16}px">
+        <input type="checkbox" ${checked} onchange="onModalTagToggle('${escapeHtml(tag.tag_id)}',this.checked)">
+        <span>${escapeHtml(tag.name)}</span>
+      </label>`);
+    (tagChildren[tag.tag_id] || []).forEach(c => walk(c, depth + 1));
+  };
+  (tagChildren[''] || []).forEach(t => walk(t, 0));
+  host.innerHTML = rows.length ? rows.join('') : '<div class="grant-hint">尚無可用標籤，請先由管理員於「權限管理」建立。</div>';
+  applyTagFilter();
+}
+
+// 只切換顯示，不重建輸入節點（注音防護）
+function applyTagFilter() {
+  const kw = document.getElementById('tagFilter').value.trim().toLowerCase();
+  document.querySelectorAll('#tagCheckList .ms-opt').forEach(el => {
+    const match = !kw || (el.getAttribute('data-name') || '').indexOf(kw) >= 0;
+    el.classList.toggle('hidden', !match);
+  });
+}
+
+function onModalTagToggle(tagId, on) {
+  const i = modalTagIds.indexOf(tagId);
+  if (on && i < 0) modalTagIds.push(tagId);
+  if (!on && i >= 0) modalTagIds.splice(i, 1);
+  renderModalTagChips();
+}
+
+function removeModalTag(tagId) {
+  const i = modalTagIds.indexOf(tagId);
+  if (i >= 0) modalTagIds.splice(i, 1);
+  renderModalTagChips();
+  if (!document.getElementById('tagPanel').hidden) renderModalTagCheckList();
+}
+
+function tagSelectAll() {
+  modalTagIds = (tags || []).map(t => t.tag_id);
+  renderModalTagChips();
+  renderModalTagCheckList();
+}
+
+function tagClearAll() {
+  modalTagIds = [];
+  renderModalTagChips();
+  renderModalTagCheckList();
+}
+
+function sameIdSet(a, b) {
+  if (a.length !== b.length) return false;
+  const sa = a.slice().sort().join(','), sb = b.slice().sort().join(',');
+  return sa === sb;
+}
+
+// ============================================================
 // 頁籤切換
 // ============================================================
 function switchTab(name) {
-  ['dash', 'list', 'graph'].forEach(t => {
+  if (name === 'admin' && !currentUser.isAdmin) return; // 非管理員不得進入
+  ['dash', 'list', 'graph', 'admin'].forEach(t => {
     document.getElementById('tabBtn-' + t).classList.toggle('active', t === name);
     document.getElementById('tabPage-' + t).classList.toggle('active', t === name);
   });
   if (name === 'dash') renderDashboard();
   if (name === 'graph' && !graphCache) loadGraph();
+  if (name === 'admin') renderAdminTab();
 }
 
 // ============================================================
@@ -750,20 +1209,33 @@ function gotoDoc(docId) {
 // ============================================================
 // 文件清單渲染
 // ============================================================
-function renderTable() {
+// 目前清單套用的完整過濾（搜尋＋類別＋狀態＋資料夾）；渲染與匯出共用
+function currentFilteredDocs() {
   const kw = document.getElementById('searchInput').value.trim().toLowerCase();
   const cat = document.getElementById('filterCategory').value;
   const st = document.getElementById('filterStatus').value;
 
-  const filtered = allDocs.filter(d => {
+  let subtree = null; // 資料夾＝標籤時的子樹集合
+  if (selectedFolder.type === 'tag') subtree = tagSubtreeIds(selectedFolder.id);
+
+  return allDocs.filter(d => {
     if (cat && d.category !== cat) return false;
     if (st && d.status !== st) return false;
     if (kw) {
       const hay = `${d.doc_id} ${d.title} ${d.owner}`.toLowerCase();
       if (!hay.includes(kw)) return false;
     }
+    if (selectedFolder.type === 'untagged') {
+      if ((docTagIds[d.doc_id] || []).length) return false;
+    } else if (subtree) {
+      if (!(docTagIds[d.doc_id] || []).some(tid => subtree.has(tid))) return false;
+    }
     return true;
   });
+}
+
+function renderTable() {
+  const filtered = currentFilteredDocs();
 
   const tbody = document.getElementById('docTableBody');
   tbody.innerHTML = '';
@@ -802,23 +1274,17 @@ function reviewCell(d) {
 // CSV 匯出（前端組檔，加 BOM 避免 Excel 中文亂碼）
 // ============================================================
 function exportCsv() {
-  const kw = document.getElementById('searchInput').value.trim().toLowerCase();
-  const cat = document.getElementById('filterCategory').value;
-  const st = document.getElementById('filterStatus').value;
-  const filtered = allDocs.filter(d => {
-    if (cat && d.category !== cat) return false;
-    if (st && d.status !== st) return false;
-    if (kw && !(`${d.doc_id} ${d.title} ${d.owner}`.toLowerCase().includes(kw))) return false;
-    return true;
-  });
+  const filtered = currentFilteredDocs();
 
-  const headers = ['文件編號','標題','類別','狀態','負責人','負責人ID','負責人信箱','更新日期','版本','發布日期','下次審查日','審查週期(月)','Drive位置'];
+  const headers = ['文件編號','標題','類別','狀態','負責人','負責人ID','負責人信箱','更新日期','版本','發布日期','下次審查日','審查週期(月)','標籤','Drive位置'];
   const csvEscape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const lines = [headers.map(csvEscape).join(',')];
   filtered.forEach(d => {
+    const tagNames = (docTagIds[d.doc_id] || [])
+      .map(tid => tagById[tid] ? tagById[tid].name : '').filter(Boolean).join('、');
     lines.push([
       d.doc_id, d.title, d.category, d.status, d.owner, d.owner_id, d.owner_email,
-      d.updated_at, d.version, d.published_at, d.next_review, d.review_cycle, d.drive_loc,
+      d.updated_at, d.version, d.published_at, d.next_review, d.review_cycle, tagNames, d.drive_loc,
     ].map(csvEscape).join(','));
   });
 
@@ -881,9 +1347,12 @@ function renderDetail(docId, descendants, ancestors, history) {
   if (!doc) return;
   const editable = canEditDoc(doc);
 
-  const driveLink = doc.drive_loc
-    ? `<a href="${escapeHtml(doc.drive_loc)}" target="_blank" rel="noopener">開啟連結 ↗</a>`
-    : '<span style="color:#9ca3af">未設定</span>';
+  const driveHref = safeUrl(doc.drive_loc);
+  const driveLink = driveHref
+    ? `<a href="${escapeHtml(driveHref)}" target="_blank" rel="noopener">開啟連結 ↗</a>`
+    : (doc.drive_loc
+        ? `<span style="color:#9ca3af">${escapeHtml(doc.drive_loc)}</span>`
+        : '<span style="color:#9ca3af">未設定</span>');
 
   // 審查資訊列（已發布文件才有意義）
   let reviewRow = '';
@@ -955,6 +1424,9 @@ function renderDetail(docId, descendants, ancestors, history) {
       <dt>Drive</dt><dd>${driveLink}</dd>
     </dl>
 
+    <div class="section-title"><span>🏷 標籤</span></div>
+    <div class="ms-chips" style="margin-bottom:4px">${docTagChipsHtml(docId)}</div>
+
     <div class="section-title">
       <span>📎 此文件引用（向下關聯）</span>
       ${editable ? `<button onclick="openRelModal('${escapeHtml(docId)}')">＋ 新增關聯</button>` : ''}
@@ -975,7 +1447,7 @@ function renderDetail(docId, descendants, ancestors, history) {
 // ============================================================
 function snapshotModal(id) {
   const inputs = document.querySelectorAll(`#${id} input, #${id} select, #${id} textarea`);
-  return Array.from(inputs).map(el => el.value).join('');
+  return Array.from(inputs).filter(el => !el.closest('.ms-panel')).map(el => el.value).join('');
 }
 function openModalWithGuard(id) {
   document.getElementById(id).classList.add('show');
@@ -1063,6 +1535,7 @@ function openDocModal(docId) {
     ownerSel.value = (currentUser.email || '').toLowerCase();
   }
 
+  initModalTagSelect(docId, isEdit);
   openModalWithGuard('docModal');
 }
 
@@ -1081,6 +1554,11 @@ function saveDoc() {
     review_cycle: document.getElementById('f_review_cycle').value,
   };
   if (!payload.title) { showToast('請輸入標題'); return; }
+
+  // 新建可同時帶標籤（apiCreateDoc 支援 tagIds）；更新則走 apiSetDocTags
+  if (!docId && modalTagEditable) payload.tagIds = modalTagIds.slice();
+  const tagsChanged = modalTagEditable && !sameIdSet(modalTagIds, modalTagIdsOriginal);
+  const tagsToSave = modalTagIds.slice();
 
   showLoading(true);
   const apiName = docId ? 'apiUpdateDoc' : 'apiCreateDoc';
@@ -1102,19 +1580,50 @@ function saveDoc() {
             next_review:  res.next_review ?? allDocs[idx].next_review,
           });
         }
+        // 更新：標籤有變更才另呼叫 apiSetDocTags 覆寫
+        if (tagsChanged) persistDocTags(docId, tagsToSave, modalTagIdsOriginal.slice());
         showToast('已更新');
       } else {
         allDocs.push(Object.assign({}, payload, {
           doc_id: res.doc_id, updated_at: todayStr, published_at: '', next_review: '',
         }));
+        // 新建：後端已隨 tagIds 貼標，前端樂觀同步
+        if (modalTagEditable) setLocalDocTags(res.doc_id, tagsToSave);
         showToast('已新增：' + res.doc_id);
       }
+      renderFolderTree();
       renderTable();
       renderDashboard();
       selectDoc(docId || res.doc_id);
     })
     .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
     [apiName](payload);
+}
+
+// 更新文件標籤（整組覆寫）；失敗回滾本地標籤狀態
+function persistDocTags(docId, tagIds, original) {
+  setLocalDocTags(docId, tagIds);         // 樂觀
+  renderFolderTree();
+  google.script.run
+    .withSuccessHandler(res => {
+      if (!res || !res.success) {
+        setLocalDocTags(docId, original); // 回滾
+        renderFolderTree();
+        if (selectedDocId === docId) selectDoc(docId);
+        showToast('標籤儲存失敗：' + ((res && res.error) || '未知錯誤'));
+        return;
+      }
+      setLocalDocTags(docId, res.tagIds || tagIds); // 以後端接受集為準
+      renderFolderTree();
+      if (selectedDocId === docId) selectDoc(docId);
+    })
+    .withFailureHandler(err => {
+      setLocalDocTags(docId, original);
+      renderFolderTree();
+      if (selectedDocId === docId) selectDoc(docId);
+      showToast('標籤儲存失敗：' + err.message);
+    })
+    .apiSetDocTags(docId, tagIds);
 }
 
 function deleteDoc(docId) {
@@ -1125,11 +1634,13 @@ function deleteDoc(docId) {
       showLoading(false);
       if (!res.success) { showToast('刪除失敗：' + res.error); return; }
       allDocs = allDocs.filter(d => d.doc_id !== docId);
+      setLocalDocTags(docId, []); // 後端已級聯清「文件標籤」，前端同步
       selectedDocId = null;
       document.getElementById('detailPanel').innerHTML =
         '<div class="detail-empty">點選左側文件查看詳細資訊與關聯</div>';
       graphCache = null; // 關聯已變，下次進圖頁重新載入
       showToast('已刪除');
+      renderFolderTree();
       renderTable();
       renderDashboard();
     })
@@ -1405,6 +1916,262 @@ function renderGraph(data) {
       ${edgeSvg}
       ${nodeSvg}
     </svg>`;
+}
+
+// ============================================================
+// 權限管理分頁（僅管理員）
+// ============================================================
+function renderAdminTab() {
+  if (!currentUser.isAdmin) return;
+
+  // 使用者下拉（保留目前選擇）
+  const sel = document.getElementById('grantUserSelect');
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">— 選擇人員 —</option>' +
+    hrPeople.map(p =>
+      `<option value="${escapeHtml(p.email)}">${escapeHtml(p.name)}（${escapeHtml(p.email)}）</option>`
+    ).join('');
+  sel.value = keep;
+
+  renderTagMgrTree();
+  if (allGrantsCache === null) {
+    loadAllGrants(() => { if (sel.value) onGrantUserChange(); });
+  } else if (sel.value) {
+    onGrantUserChange();
+  }
+}
+
+// 重新自後端同步 tags/docTags/docs（標籤樹異動後用，確保排序與級聯正確）
+function resyncData(cb) {
+  google.script.run
+    .withSuccessHandler(data => {
+      allDocs = data.docs || [];
+      tags = data.tags || [];
+      docTags = data.docTags || [];
+      if (data.user && Array.isArray(data.user.grantedTagIds)) {
+        currentUser.grantedTagIds = data.user.grantedTagIds;
+      }
+      rebuildTagIndexes();
+      if (selectedFolder.type === 'tag' && !tagById[selectedFolder.id]) selectedFolder = { type: 'all' };
+      if (cb) cb();
+    })
+    .withFailureHandler(err => { showLoading(false); showToast('同步失敗：' + err.message); })
+    .apiGetInitData();
+}
+
+// ── 標籤樹管理 ─────────────────────────────────────────────
+function renderTagMgrTree() {
+  const host = document.getElementById('tagMgrTree');
+  if (!host) return;
+  const roots = tagChildren[''] || [];
+  if (!roots.length) {
+    host.innerHTML = '<div class="grant-hint">尚無標籤，點右上「＋ 新增根標籤」開始建立。</div>';
+    return;
+  }
+  const counts = computeFolderCounts();
+  let html = '';
+  const walk = (tag, depth) => {
+    const cnt = counts[tag.tag_id] ? counts[tag.tag_id].size : 0;
+    html += `<div class="tag-mgr-node" style="padding-left:${6 + depth * 16}px">
+      <span class="fn-icon">🏷</span>
+      <span class="tm-name">${escapeHtml(tag.name)}</span>
+      <span class="tm-count">${cnt}</span>
+      <span class="tm-acts">
+        <button title="新增子標籤" onclick="openTagModal('create','${escapeHtml(tag.tag_id)}')">＋</button>
+        <button title="改名" onclick="openTagModal('rename','${escapeHtml(tag.tag_id)}')">✎</button>
+        <button title="搬移" onclick="openTagModal('move','${escapeHtml(tag.tag_id)}')">⇄</button>
+        <button class="del" title="刪除" onclick="deleteTag('${escapeHtml(tag.tag_id)}')">🗑</button>
+      </span>
+    </div>`;
+    (tagChildren[tag.tag_id] || []).forEach(c => walk(c, depth + 1));
+  };
+  roots.forEach(t => walk(t, 0));
+  host.innerHTML = html;
+}
+
+// 建立「上層標籤」下拉選項；excludeSet 內的 tag_id 不列出（搬移時排除自身子樹）
+function buildParentOptions(excludeSet, selectedVal) {
+  let html = `<option value="">（根／最上層）</option>`;
+  const walk = (tag, depth) => {
+    if (!excludeSet || !excludeSet.has(tag.tag_id)) {
+      const pad = '　'.repeat(depth);
+      html += `<option value="${escapeHtml(tag.tag_id)}" ${tag.tag_id === selectedVal ? 'selected' : ''}>${pad}${escapeHtml(tag.name)}</option>`;
+    }
+    (tagChildren[tag.tag_id] || []).forEach(c => walk(c, depth + 1));
+  };
+  (tagChildren[''] || []).forEach(t => walk(t, 0));
+  return html;
+}
+
+function openTagModal(mode, tagId) {
+  document.getElementById('tm_mode').value = mode;
+  document.getElementById('tm_tag_id').value = tagId || '';
+  const nameGroup = document.getElementById('tm_name_group');
+  const parentGroup = document.getElementById('tm_parent_group');
+  const nameInput = document.getElementById('tm_name');
+  const parentSel = document.getElementById('tm_parent');
+  const title = document.getElementById('tagModalTitle');
+
+  if (mode === 'create') {
+    title.textContent = '新增標籤';
+    nameGroup.style.display = ''; parentGroup.style.display = '';
+    nameInput.value = '';
+    parentSel.innerHTML = buildParentOptions(null, tagId || '');
+  } else if (mode === 'rename') {
+    title.textContent = '標籤改名';
+    nameGroup.style.display = ''; parentGroup.style.display = 'none';
+    nameInput.value = (tagById[tagId] || {}).name || '';
+  } else { // move
+    title.textContent = '搬移標籤';
+    nameGroup.style.display = 'none'; parentGroup.style.display = '';
+    nameInput.value = '';
+    parentSel.innerHTML = buildParentOptions(tagSubtreeIds(tagId), (tagById[tagId] || {}).parent_id || '');
+  }
+  openModalWithGuard('tagModal');
+}
+
+function saveTag() {
+  const mode = document.getElementById('tm_mode').value;
+  const tagId = document.getElementById('tm_tag_id').value;
+  const name = document.getElementById('tm_name').value.trim();
+  const parent = document.getElementById('tm_parent').value;
+
+  let invoke;
+  if (mode === 'create') {
+    if (!name) { showToast('請輸入標籤名稱'); return; }
+    invoke = g => g.apiCreateTag(name, parent);
+  } else if (mode === 'rename') {
+    if (!name) { showToast('請輸入標籤名稱'); return; }
+    invoke = g => g.apiRenameTag(tagId, name);
+  } else {
+    invoke = g => g.apiMoveTag(tagId, parent);
+  }
+
+  showLoading(true);
+  const runner = google.script.run
+    .withSuccessHandler(res => {
+      showLoading(false);
+      if (!res || !res.success) { showToast('操作失敗：' + ((res && res.error) || '未知錯誤')); return; }
+      closeModal('tagModal');
+      showToast('已儲存');
+      resyncData(() => {
+        renderFolderTree(); renderTable(); renderTagMgrTree();
+        if (document.getElementById('grantUserSelect').value) onGrantUserChange();
+      });
+    })
+    .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); });
+  invoke(runner);
+}
+
+function deleteTag(tagId) {
+  const sub = tagSubtreeIds(tagId);
+  const t = tagById[tagId];
+  const extra = sub.size > 1 ? `\n（含 ${sub.size - 1} 個子標籤，將一併刪除）` : '';
+  if (!confirm(`確定刪除標籤「${t ? t.name : tagId}」？${extra}\n此標籤（及其子標籤）在所有文件上的貼標、以及所有使用者的相關授權都會一併移除，且無法復原。`)) return;
+
+  showLoading(true);
+  google.script.run
+    .withSuccessHandler(res => {
+      showLoading(false);
+      if (!res || !res.success) { showToast('刪除失敗：' + ((res && res.error) || '未知錯誤')); return; }
+      const n = (res.deleted && res.deleted.length) || 1;
+      showToast('已刪除標籤（共 ' + n + ' 個）');
+      allGrantsCache = null; // 授權已級聯清理，強制重載
+      resyncData(() => { renderFolderTree(); renderTable(); renderAdminTab(); });
+    })
+    .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
+    .apiDeleteTag(tagId);
+}
+
+// ── 使用者授權 ─────────────────────────────────────────────
+function loadAllGrants(cb) {
+  google.script.run
+    .withSuccessHandler(list => {
+      allGrantsCache = {};
+      (list || []).forEach(g => {
+        allGrantsCache[String(g.email).toLowerCase()] = (g.tagIds || []).slice();
+      });
+      if (cb) cb();
+    })
+    .withFailureHandler(err => { allGrantsCache = {}; showToast('授權資料載入失敗：' + err.message); })
+    .apiGetAllGrants();
+}
+
+function onGrantUserChange() {
+  const email = document.getElementById('grantUserSelect').value.toLowerCase();
+  const wrap = document.getElementById('grantSaveWrap');
+  const tree = document.getElementById('grantTree');
+  if (!email) {
+    grantChecked = {};
+    tree.innerHTML = '<div class="grant-hint">請先選擇一位使用者。</div>';
+    wrap.style.display = 'none';
+    return;
+  }
+  if (allGrantsCache === null) { loadAllGrants(() => onGrantUserChange()); return; }
+  grantChecked = {};
+  (allGrantsCache[email] || []).forEach(tid => { if (tagById[tid]) grantChecked[tid] = true; });
+  wrap.style.display = '';
+  renderGrantTree();
+}
+
+// 某標籤是否因上層被授權而「已繼承」
+function isGrantInherited(tagId) {
+  let cur = (tagById[tagId] || {}).parent_id || '';
+  while (cur && tagById[cur]) {
+    if (grantChecked[cur]) return true;
+    cur = tagById[cur].parent_id || '';
+  }
+  return false;
+}
+
+function renderGrantTree() {
+  const host = document.getElementById('grantTree');
+  const roots = tagChildren[''] || [];
+  if (!roots.length) {
+    host.innerHTML = '<div class="grant-hint">尚無標籤可授權，請先於左側建立標籤樹。</div>';
+    return;
+  }
+  let html = '';
+  const walk = (tag, depth) => {
+    const inherited = isGrantInherited(tag.tag_id);
+    const checked = (inherited || grantChecked[tag.tag_id]) ? 'checked' : '';
+    const disabled = inherited ? 'disabled' : '';
+    const badge = inherited ? '<span class="inherited-tag">已繼承</span>' : '';
+    html += `<label class="grant-opt" style="padding-left:${2 + depth * 16}px">
+      <input type="checkbox" ${checked} ${disabled} onchange="onGrantToggle('${escapeHtml(tag.tag_id)}',this.checked)">
+      <span>${escapeHtml(tag.name)}</span>${badge}
+    </label>`;
+    (tagChildren[tag.tag_id] || []).forEach(c => walk(c, depth + 1));
+  };
+  roots.forEach(t => walk(t, 0));
+  host.innerHTML = html;
+}
+
+function onGrantToggle(tagId, on) {
+  if (on) grantChecked[tagId] = true; else delete grantChecked[tagId];
+  renderGrantTree(); // 重新計算子節點「已繼承」顯示
+}
+
+function saveGrants() {
+  const email = document.getElementById('grantUserSelect').value.toLowerCase();
+  if (!email) { showToast('請先選擇使用者'); return; }
+  // 只送「明確勾選且未被上層涵蓋」的最小授權集合
+  const explicit = Object.keys(grantChecked).filter(id => tagById[id] && !isGrantInherited(id));
+
+  showLoading(true);
+  google.script.run
+    .withSuccessHandler(res => {
+      showLoading(false);
+      if (!res || !res.success) { showToast('授權失敗：' + ((res && res.error) || '未知錯誤')); return; }
+      if (allGrantsCache === null) allGrantsCache = {};
+      allGrantsCache[email] = (res.tagIds || explicit).slice();
+      grantChecked = {};
+      allGrantsCache[email].forEach(tid => { if (tagById[tid]) grantChecked[tid] = true; });
+      renderGrantTree();
+      showToast('已儲存授權（' + allGrantsCache[email].length + ' 項）');
+    })
+    .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
+    .apiSetUserGrants(email, explicit);
 }
 </script>
 </body>

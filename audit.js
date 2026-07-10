@@ -45,8 +45,21 @@ function _diffSummary(oldDoc, newDoc) {
   return changes.join('；');
 }
 
+// 遮蔽異動摘要中「使用者無權檢視」的 doc_id。
+// 關聯類動作會把對象 doc_id 寫進摘要（如「A → DOC-B」），若 DOC-B 不在
+// 可見集，直接回傳會洩漏其存在，違反「不可見文件完全隱藏」。
+function _redactInvisibleDocIds(summary, visibleSet) {
+  return String(summary || '').replace(/DOC-\d+/g, function(id) {
+    return visibleSet.has(id) ? id : '（無權限文件）';
+  });
+}
+
 // ── 前端 API：查詢單一文件的異動歷史（新→舊排序）─────────────
+// 入口先過 _assertCanViewDoc：不可見文件的歷史完全不回傳；
+// 可見文件的摘要再經 _redactInvisibleDocIds 遮蔽其中不可見的關聯對象。
 function apiGetDocHistory(docId) {
+  const ctx = _assertCanViewDoc(docId);
+  const visible = _getVisibleDocIds(ctx);
   const sheet = _getSheet(SHEET_NAMES.AUDIT);
   const rows = sheet.getDataRange().getDisplayValues();
 
@@ -57,7 +70,7 @@ function apiGetDocHistory(docId) {
       operator:  r[AUDIT_COL.OPERATOR],
       action:    r[AUDIT_COL.ACTION],
       version:   r[AUDIT_COL.VERSION],
-      summary:   r[AUDIT_COL.SUMMARY],
+      summary:   _redactInvisibleDocIds(r[AUDIT_COL.SUMMARY], visible),
     }))
     .reverse();
 }
