@@ -13,6 +13,7 @@ function deployAllSheets() {
   _deployTagSheet(ss);
   _deployDocTagSheet(ss);
   _deployGrantSheet(ss);
+  _deployGroupGrantSheet(ss);
 
   SpreadsheetApp.flush();
   Logger.log('✅ 所有工作表初始化完成');
@@ -265,6 +266,26 @@ function _deployGrantSheet(ss) {
   const colWidths = [260, 140];
   colWidths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
   Logger.log(`✅ ${SHEET_NAMES.GRANTS} 初始化完成`);
+}
+
+// ── 建立「群組授權」工作表（V4）───────────────────────────────
+function _deployGroupGrantSheet(ss) {
+  const sheet = _deployV3Sheet(
+    ss, SHEET_NAMES.GROUP_GRANTS,
+    ['org_code', 'title', 'tag_id'],
+    ['A', 'B', 'C'], '#2d5c4a');
+  const colWidths = [160, 160, 140];
+  colWidths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
+  Logger.log(`✅ ${SHEET_NAMES.GROUP_GRANTS} 初始化完成`);
+}
+
+// ── V3 → V4 遷移：新增群組授權表 ─────────────────────────────
+// 冪等設計：表頭已存在就跳過，可重複執行。
+function migrateV4() {
+  const ss = SpreadsheetApp.openById(ENV.SPREADSHEET_ID);
+  _deployGroupGrantSheet(ss);
+  SpreadsheetApp.flush();
+  Logger.log('✅ migrateV4 完成（群組授權）');
 }
 
 // ── 寫入測試資料（選用）──────────────────────────────────────
