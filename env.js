@@ -30,6 +30,33 @@ const HR_COL = {
 // 只排除確定不該有存取權的狀態，其餘一律放行。
 const EXCLUDED_HR_STATUS = ['離職'];
 
+// ── HR 主表「組織架構樹」結構（依 docs/HR_sheet.md 契約）─────
+// V4 群組授權用；動用前先跑 debugGetSystemData() 核對實表表頭。
+const HR_ORG_SHEET_NAME = '組織架構樹';
+const HR_ORG_COL = {
+  TYPE:          0,  // A: 組織類型（ORG/TF/PARTNER/GOV）
+  LEVEL:         1,  // B: 層級（1=EGC … 6=駐站）
+  CODE:          2,  // C: 代碼（主鍵，如 DEPT-BIO）
+  NAME:          3,  // D: 名稱
+  ALIAS:         4,  // E: 別名
+  PARENT_CODE:   5,  // F: 上級代碼（根節點空）
+  MANAGER_EMAIL: 6,  // G: 管理人員信箱
+  MANAGER_NAME:  7,  // H: 管理人員姓名
+};
+
+// ── HR 主表「人員職務配置」結構（依 docs/HR_sheet.md 契約）───
+// 矩陣兼任＝一人多列；V4 群組授權的成員名冊唯一來源。
+const HR_ASSIGN_SHEET_NAME = '人員職務配置';
+const HR_ASSIGN_COL = {
+  EMAIL:         0,  // A: 信箱（FK 人員主檔）
+  NAME:          1,  // B: 姓名（冗餘欄）
+  ORG_CODE:      2,  // C: 所屬組別代碼（FK 組織架構樹.代碼）
+  ORG_NAME:      3,  // D: 所屬組別（冗餘欄）
+  TITLE:         4,  // E: 職稱
+  MANAGER_EMAIL: 5,  // F: 主管信箱
+  MANAGER_NAME:  6,  // G: 直屬主管（冗餘欄）
+};
+
 // ── 工作表名稱 ────────────────────────────────────────────────
 const SHEET_NAMES = {
   DOCS:     '文件清單',
@@ -38,6 +65,7 @@ const SHEET_NAMES = {
   TAGS:     '標籤主檔',   // V3：標籤樹（adjacency list）
   DOC_TAGS: '文件標籤',   // V3：文件↔標籤多對多
   GRANTS:   '使用者授權', // V3：使用者↔標籤授權
+  GROUP_GRANTS: '群組授權', // V4：群組（組織/職稱）↔ 標籤授權
 };
 
 // ── 文件清單欄位索引（0-based，對應 getValues() 陣列）────────
@@ -103,6 +131,17 @@ const GRANT_COL = {
   TAG_ID: 1,  // B: tag_id
 };
 const GRANT_COL_COUNT = 2;
+
+// ── 群組授權欄位索引（0-based）（V4）────────────────────────
+// (org_code, title) 至少一欄非空；一列一組授權。
+// org_code 精確比對職務配置（僅直屬成員，不含子單位——與標籤樹的
+// 父含子繼承「相反」，這是設計定案，勿順手改成展開子樹）。
+const GROUPGRANT_COL = {
+  ORG_CODE: 0,  // A: org_code（HR 組織架構樹.代碼；可空）
+  TITLE:    1,  // B: title（HR 人員職務配置.職稱；可空）
+  TAG_ID:   2,  // C: tag_id（標籤主檔）
+};
+const GROUPGRANT_COL_COUNT = 3;
 
 // ── 文件狀態選項 ──────────────────────────────────────────────
 const DOC_STATUS = ['草稿', '審核中', '已發布', '已廢止'];
