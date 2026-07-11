@@ -133,6 +133,8 @@ function apiGetInitData() {
   const docTags = _readDocTags().filter(dt => visible.has(dt.doc_id));
   // 當前使用者的有效授權標籤（個人∪群組，read 含 edit；前端資料夾樹用）
   const grantedTagIds = Array.from(_getEffectiveGrantedTagIds(ctx).read);
+  // 可編輯文件集（V5）：前端據此顯示編輯入口；每個寫入 API 仍逐一重新斷言（IDOR 防護）
+  const editable = _getEditableDocIds(ctx);
 
   return {
     docs: docs,
@@ -146,6 +148,7 @@ function apiGetInitData() {
     hrPeople: ctx.isWhitelisted ? _getHrPeople() : [],
     tags: tags,
     docTags: docTags,
+    editableDocIds: docs.filter(d => editable.has(d.doc_id)).map(d => d.doc_id),
   };
 }
 
@@ -217,6 +220,15 @@ function apiUpdateDoc(doc) {
     if (idx < 1) return { success: false, error: '找不到文件：' + doc.doc_id };
 
     const oldDoc = _readDocs().find(d => d.doc_id === doc.doc_id);
+
+    // V5：更換負責人屬權限管理行為，僅管理員或現任負責人可為之
+    // （edit 授權者送回的 owner_email 未變動時不觸發；含清空也算變動，fail-closed）
+    const newOwnerEmail = String(doc.owner_email || '').trim().toLowerCase();
+    const oldOwnerEmail = String(oldDoc.owner_email || '').trim().toLowerCase();
+    if (newOwnerEmail !== oldOwnerEmail) {
+      _assertOwnerOrAdmin(doc.doc_id);
+    }
+
     const oldStatus = oldDoc.status;
     const newStatus = doc.status || oldStatus;
 
@@ -379,9 +391,14 @@ function apiAddRelation(ancestorId, descendantId, relationType, description) {
     }
 
     // 目標文件也必須可見，否則會形成「存在性 oracle」：回傳值可反推
-    // 不可見文件是否存在／是否已發布，且 supersedes 會越權廢止隱藏文件。
-    // 依計畫「不可見文件的關聯完全隱藏」，關聯對象一律需通過可見性檢查。
-    _assertCanViewDoc(descendantId);
+    // 不可見文件是否存在／是否已發布。
+    // V5 收緊：supersedes 會自動廢止對方已發布文件，屬對後代端的實質寫入，
+    // 需具備後代端的「編輯權」（edit 蘊含可見，檢查已涵蓋可見性）。
+    if (relationType === 'supersedes') {
+      _assertCanEditDoc(descendantId);
+    } else {
+      _assertCanViewDoc(descendantId);
+    }
 
     const closure = _readClosure();
 
@@ -598,12 +615,13 @@ function apiGetGraphData() {
 // 全部走 LockService＋_assert*＋_logAudit＋SpreadsheetApp.flush()
 // ============================================================
 
-// 整組覆寫某文件的標籤（管理員或該文件負責人）。
+// 整組覆寫某文件的標籤（僅管理員或該文件負責人）。
+// V5：edit 授權者不可貼標——改標籤＝改可見範圍，屬權限管理行為。
 function apiSetDocTags(docId, tagIds) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    _assertCanEditDoc(docId);
+    _assertOwnerOrAdmin(docId);
 
     // 僅接受既有標籤
     const validTagIds = new Set(_readTags().map(t => t.tag_id));
