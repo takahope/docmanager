@@ -57,7 +57,7 @@ function migrateV2() {
     Logger.log(`✅ 補上欄位：${h.name}（第 ${h.col} 欄）`);
   });
 
-  _applyDocSheetV2Formats(sheet);
+  _applyDocSheetFormats(sheet);
   _deployAuditSheet(ss);
 
   SpreadsheetApp.flush();
@@ -74,7 +74,7 @@ function _deployDocSheet(ss) {
 
   const headers = [
     'doc_id', 'title', 'category', 'status',
-    'owner', 'owner_ID', 'updated_at', 'version', 'google_drive_location',
+    'owner', 'updated_at', 'version', 'google_drive_location',
     'owner_email', 'published_at', 'next_review_date', 'review_cycle_months'
   ];
 
@@ -88,10 +88,9 @@ function _deployDocSheet(ss) {
 
   // 欄位格式：doc_id 強制文字避免被轉型
   sheet.getRange('A:A').setNumberFormat('@');
-  sheet.getRange('F:F').setNumberFormat('@'); // owner_ID 也強制文字
 
   // 欄寬設定
-  const colWidths = [120, 240, 100, 80, 100, 120, 120, 80, 280, 200, 110, 130, 90];
+  const colWidths = [120, 240, 100, 80, 100, 120, 80, 280, 200, 110, 130, 90];
   colWidths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
 
   // 資料驗證：status 下拉
@@ -127,23 +126,48 @@ function _deployDocSheet(ss) {
     sheet.setConditionalFormatRules(rules);
   });
 
-  _applyDocSheetV2Formats(sheet);
+  _applyDocSheetFormats(sheet);
 
   Logger.log(`✅ ${SHEET_NAMES.DOCS} 初始化完成`);
 }
 
-// V2 新欄位的格式與驗證（deployAllSheets 與 migrateV2 共用）
-function _applyDocSheetV2Formats(sheet) {
-  // owner_email、日期欄強制文字，避免日期被序列化成 Date 物件
-  sheet.getRange('J:J').setNumberFormat('@');
-  sheet.getRange('K:L').setNumberFormat('@');
+// 新欄位的格式與驗證（deployAllSheets 與 migrate 共用）
+function _applyDocSheetFormats(sheet) {
+  // owner_email (I)、日期欄 (J, K) 強制文字，避免日期被序列化成 Date 物件
+  sheet.getRange('I:I').setNumberFormat('@');
+  sheet.getRange('J:K').setNumberFormat('@');
 
-  // 資料驗證：review_cycle_months 下拉
+  // 資料驗證：review_cycle_months (L) 下拉
   const cycleRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(REVIEW_CYCLES.map(String), true)
     .setAllowInvalid(true) // 允許空值（未發布文件可不填）
     .build();
-  sheet.getRange('M2:M1000').setDataValidation(cycleRule);
+  sheet.getRange('L2:L1000').setDataValidation(cycleRule);
+}
+
+// ── V4 → V5 遷移：移除 owner_ID 欄位 ─────────────────────────
+// 冪等設計：若第 6 欄 (原 F 欄) 表頭為 owner_ID，則將其刪除，後續欄位左移。
+function migrateV5() {
+  const ss = SpreadsheetApp.openById(ENV.SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_NAMES.DOCS);
+  if (!sheet) {
+    Logger.log(`找不到工作表：${SHEET_NAMES.DOCS}`);
+    return;
+  }
+
+  const header = sheet.getRange(1, 6).getValue();
+  if (String(header).toLowerCase().includes('owner_id')) {
+    sheet.deleteColumn(6);
+    Logger.log('✅ 已刪除 owner_ID 欄位 (原 F 欄)，後續欄位自動左移。');
+  } else {
+    Logger.log('✅ owner_ID 欄位已不存在，跳過刪除動作。');
+  }
+
+  // 重新套用最新版的格式與資料驗證
+  _applyDocSheetFormats(sheet);
+
+  SpreadsheetApp.flush();
+  Logger.log('✅ migrateV5 完成（移除 owner_ID 欄位）');
 }
 
 // ── 建立「文件關聯」工作表 ─────────────────────────────────────

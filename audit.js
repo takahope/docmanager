@@ -31,7 +31,7 @@ function _logAudit(action, docId, version, summary) {
 function _diffSummary(oldDoc, newDoc) {
   const FIELD_LABELS = {
     title: '標題', category: '類別', status: '狀態',
-    owner: '負責人', owner_id: '負責人ID', owner_email: '負責人信箱',
+    owner: '負責人', owner_email: '負責人信箱',
     version: '版本', drive_loc: 'Drive位置', review_cycle: '審查週期',
   };
   const changes = [];

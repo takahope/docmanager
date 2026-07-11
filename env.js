@@ -75,16 +75,15 @@ const DOC_COL = {
   CATEGORY:            2,   // C: category
   STATUS:              3,   // D: status
   OWNER:               4,   // E: owner
-  OWNER_ID:            5,   // F: owner_ID
-  UPDATED_AT:          6,   // G: updated_at
-  VERSION:             7,   // H: version
-  GOOGLE_DRIVE_LOC:    8,   // I: google_drive_location
-  OWNER_EMAIL:         9,   // J: owner_email（權限比對用）
-  PUBLISHED_AT:        10,  // K: published_at（轉「已發布」時自動填）
-  NEXT_REVIEW:         11,  // L: next_review_date（發布日 + 審查週期）
-  REVIEW_CYCLE:        12,  // M: review_cycle_months（審查週期，月）
+  UPDATED_AT:          5,   // F: updated_at
+  VERSION:             6,   // G: version
+  GOOGLE_DRIVE_LOC:    7,   // H: google_drive_location
+  OWNER_EMAIL:         8,   // I: owner_email（權限比對用）
+  PUBLISHED_AT:        9,   // J: published_at（轉「已發布」時自動填）
+  NEXT_REVIEW:         10,  // K: next_review_date（發布日 + 審查週期）
+  REVIEW_CYCLE:        11,  // L: review_cycle_months（審查週期，月）
 };
-const DOC_COL_COUNT = 13;   // 文件清單總欄數（appendRow / setValues 用）
+const DOC_COL_COUNT = 12;   // 文件清單總欄數（appendRow / setValues 用）
 
 // ── 異動紀錄欄位索引（0-based）───────────────────────────────
 const AUDIT_COL = {

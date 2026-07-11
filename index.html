@@ -600,7 +600,6 @@
       </div>
       <div class="form-row">
         <div class="form-group"><label>負責人姓名</label><input id="f_owner"></div>
-        <div class="form-group"><label>負責人 ID</label><input id="f_owner_id"></div>
       </div>
       <div class="form-group"><label>負責人信箱</label><input id="f_owner_email" placeholder="留空＝建立者本人">
         <div class="field-hint">用於權限判定：此信箱的使用者可編輯本文件</div>
@@ -1319,14 +1318,14 @@ function reviewCell(d) {
 function exportCsv() {
   const filtered = currentFilteredDocs();
 
-  const headers = ['文件編號','標題','類別','狀態','負責人','負責人ID','負責人信箱','更新日期','版本','發布日期','下次審查日','審查週期(月)','標籤','Drive位置'];
+  const headers = ['文件編號','標題','類別','狀態','負責人','負責人信箱','更新日期','版本','發布日期','下次審查日','審查週期(月)','標籤','Drive位置'];
   const csvEscape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const lines = [headers.map(csvEscape).join(',')];
   filtered.forEach(d => {
     const tagNames = (docTagIds[d.doc_id] || [])
       .map(tid => tagById[tid] ? tagById[tid].name : '').filter(Boolean).join('、');
     lines.push([
-      d.doc_id, d.title, d.category, d.status, d.owner, d.owner_id, d.owner_email,
+      d.doc_id, d.title, d.category, d.status, d.owner, d.owner_email,
       d.updated_at, d.version, d.published_at, d.next_review, d.review_cycle, tagNames, d.drive_loc,
     ].map(csvEscape).join(','));
   });
@@ -1460,7 +1459,7 @@ function renderDetail(docId, descendants, ancestors, history) {
     <dl class="detail-meta">
       <dt>類別</dt><dd>${escapeHtml(doc.category)}</dd>
       <dt>狀態</dt><dd>${statusBadge(doc.status)}</dd>
-      <dt>負責人</dt><dd>${escapeHtml(doc.owner)}（${escapeHtml(doc.owner_id)}）${doc.owner_email ? '<br>' + escapeHtml(doc.owner_email) : ''}</dd>
+      <dt>負責人</dt><dd>${escapeHtml(doc.owner)}${doc.owner_email ? '<br>' + escapeHtml(doc.owner_email) : ''}</dd>
       <dt>版本</dt><dd>${escapeHtml(doc.version)}</dd>
       <dt>更新日期</dt><dd>${escapeHtml(doc.updated_at)}</dd>
       ${reviewRow}
@@ -1560,7 +1559,6 @@ function openDocModal(docId) {
     catSel.value = doc.category;
     stSel.value = doc.status;
     document.getElementById('f_owner').value = doc.owner;
-    document.getElementById('f_owner_id').value = doc.owner_id;
     document.getElementById('f_owner_email').value = doc.owner_email || '';
     document.getElementById('f_version').value = doc.version;
     document.getElementById('f_drive_loc').value = doc.drive_loc;
@@ -1569,7 +1567,6 @@ function openDocModal(docId) {
   } else {
     document.getElementById('f_title').value = '';
     document.getElementById('f_owner').value = currentUser.name || '';
-    document.getElementById('f_owner_id').value = '';
     document.getElementById('f_owner_email').value = currentUser.email || '';
     document.getElementById('f_version').value = '0.1';
     document.getElementById('f_drive_loc').value = '';
@@ -1590,7 +1587,6 @@ function saveDoc() {
     category: document.getElementById('f_category').value,
     status: document.getElementById('f_status').value,
     owner: document.getElementById('f_owner').value.trim(),
-    owner_id: document.getElementById('f_owner_id').value.trim(),
     owner_email: document.getElementById('f_owner_email').value.trim(),
     version: document.getElementById('f_version').value.trim(),
     drive_loc: document.getElementById('f_drive_loc').value.trim(),

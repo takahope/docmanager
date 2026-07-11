@@ -58,7 +58,6 @@ function _readDocs() {
       category:     r[DOC_COL.CATEGORY],
       status:       r[DOC_COL.STATUS],
       owner:        r[DOC_COL.OWNER],
-      owner_id:     r[DOC_COL.OWNER_ID],
       updated_at:   r[DOC_COL.UPDATED_AT],
       version:      r[DOC_COL.VERSION],
       drive_loc:    r[DOC_COL.GOOGLE_DRIVE_LOC],
@@ -103,7 +102,6 @@ function _docToRow(doc) {
   row[DOC_COL.CATEGORY]         = doc.category || '';
   row[DOC_COL.STATUS]           = doc.status || '草稿';
   row[DOC_COL.OWNER]            = doc.owner || '';
-  row[DOC_COL.OWNER_ID]         = doc.owner_id || '';
   row[DOC_COL.UPDATED_AT]       = _now();
   row[DOC_COL.VERSION]          = doc.version || '0.1';
   row[DOC_COL.GOOGLE_DRIVE_LOC] = doc.drive_loc || '';
