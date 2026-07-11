@@ -133,10 +133,8 @@ function apiGetInitData() {
   }));
   // 文件標籤：僅回傳可見文件的貼標，避免經由標籤推知不可見文件存在
   const docTags = _readDocTags().filter(dt => visible.has(dt.doc_id));
-  // 當前使用者被授權的標籤（前端資料夾樹用；管理員視全部可見不受此限）
-  const grantedTagIds = _readGrants()
-    .filter(g => g.email === String(ctx.email || '').toLowerCase())
-    .map(g => g.tag_id);
+  // 當前使用者的有效授權標籤（個人∪群組；前端資料夾樹用，管理員不受此限）
+  const grantedTagIds = Array.from(_getEffectiveGrantedTagIds(ctx));
 
   return {
     docs: docs,
@@ -844,4 +842,110 @@ function apiGetAllGrants() {
     map[g.email].push(g.tag_id);
   });
   return Object.keys(map).map(email => ({ email: email, tagIds: map[email] }));
+}
+
+// ============================================================
+// 前端 API：群組授權（V4，僅管理員）
+// 群組成員名冊由 HR「人員職務配置」權威維護，本系統只存
+// (org_code, title) → tag_id 對映。org_code 不展開子樹（設計定案）。
+// ============================================================
+
+// 全部群組授權列（附組織名稱供顯示）。讀取型：失敗直接 throw。
+function apiGetGroupGrants() {
+  _assertAdmin();
+  const orgNameByCode = {};
+  _getHrOrgTree().forEach(o => { orgNameByCode[o.code] = o.name; });
+  return _readGroupGrants().map(g => ({
+    org_code: g.org_code,
+    org_name: g.org_code ? (orgNameByCode[g.org_code] || '（查無組織）') : '',
+    title:    g.title,
+    tag_id:   g.tag_id,
+  }));
+}
+
+// 整組覆寫 (orgCode, title) 組合的授權標籤；tagIds=[] 即刪除該組合。
+function apiSetGroupGrants(orgCode, title, tagIds) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    _assertAdmin();
+
+    const org = String(orgCode || '').trim();
+    const ttl = String(title || '').trim();
+    if (!org && !ttl) return { success: false, error: '組織與職稱至少擇一' };
+
+    const validTagIds = new Set(_readTags().map(t => t.tag_id));
+    const wanted = Array.from(new Set((tagIds || []).map(String).filter(Boolean)))
+      .filter(t => validTagIds.has(t));
+
+    const sheet = _getSheet(SHEET_NAMES.GROUP_GRANTS);
+    const rows = sheet.getDataRange().getDisplayValues();
+    // 刪除該 (org, title) 組合既有授權列（由下往上）
+    for (let i = rows.length - 1; i >= 1; i--) {
+      if (String(rows[i][GROUPGRANT_COL.ORG_CODE]).trim() === org &&
+          String(rows[i][GROUPGRANT_COL.TITLE]).trim() === ttl) {
+        sheet.deleteRow(i + 1);
+      }
+    }
+    if (wanted.length > 0) {
+      const newRows = wanted.map(t => [org, ttl, t]);
+      sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, GROUPGRANT_COL_COUNT)
+        .setValues(newRows);
+    }
+
+    const label = `${org || '（不限組織）'}／${ttl || '（不限職稱）'}`;
+    _logAudit('授權', '', '',
+      `設定群組授權 ${label} → ${wanted.join(', ') || '（清空）'}`);
+    SpreadsheetApp.flush();
+    return { success: true, org_code: org, title: ttl, tagIds: wanted };
+  } catch (e) {
+    return { success: false, error: String(e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 組織節點與現存職稱清單（管理 UI 下拉；職稱只能選不能打字，防打錯字）。
+function apiGetOrgOptions() {
+  _assertAdmin();
+  const orgs = _getHrOrgTree();
+  const titles = Array.from(new Set(
+    _getHrAssignments().map(a => a.title).filter(Boolean)
+  )).sort();
+  return { orgs: orgs, titles: titles };
+}
+
+// 有效權限預覽：某使用者最終取得的標籤與來源（僅管理員）。
+// 在後端計算，避免把全公司職務配置送到前端。
+function apiPreviewUserTags(email) {
+  _assertAdmin();
+  const target = String(email || '').trim().toLowerCase();
+  if (!target) return [];
+
+  const results = [];
+  const seen = new Set();
+
+  _readGrants().forEach(g => {
+    if (g.email === target && !seen.has(g.tag_id)) {
+      seen.add(g.tag_id);
+      results.push({ tag_id: g.tag_id, source: '個人授權' });
+    }
+  });
+
+  const hits = _groupGrantHits(target);
+  if (hits.length > 0) {
+    const orgNameByCode = {};
+    _getHrOrgTree().forEach(o => { orgNameByCode[o.code] = o.name; });
+    hits.forEach(gg => {
+      if (seen.has(gg.tag_id)) return;
+      seen.add(gg.tag_id);
+      const orgLabel = gg.org_code
+        ? (orgNameByCode[gg.org_code] || gg.org_code) : '不限組織';
+      results.push({
+        tag_id: gg.tag_id,
+        source: `群組授權：${orgLabel}／${gg.title || '不限職稱'}`,
+      });
+    });
+  }
+  return results;
 }
