@@ -693,6 +693,7 @@ let statusTransitions = {};
 let hrPeople = [];
 let currentUser = { email: '', name: '', isAdmin: false, isWhitelisted: false, grantedTagIds: [] };
 let isAdminView = false;   // 視角切換（UI 用）；權限判定一律以後端真實身分為準
+let editableDocIds = new Set(); // V5：後端 _getEditableDocIds 計算的可編輯文件集
 let selectedDocId = null;
 let graphCache = null;
 
@@ -762,7 +763,20 @@ function daysUntil(str) {
 }
 
 // ── 權限（UI 顯示用；後端另有真實檢查）─────────────────────
+// 可編輯？以後端計算的 editableDocIds 為準（含 V5 edit 標籤授權）。
+// 管理員切「一般視角」時模擬無特權使用者：只看負責人身分
+// （管理員的 editableDocIds 是全集，不能拿來模擬）。
 function canEditDoc(doc) {
+  if (currentUser.isAdmin) {
+    if (isAdminView) return true;
+    return !!doc.owner_email &&
+      doc.owner_email.toLowerCase() === currentUser.email.toLowerCase();
+  }
+  return editableDocIds.has(doc.doc_id);
+}
+// 可管理標籤／更換負責人？僅管理員（管理視角）或負責人。
+// V5：不隨 edit 授權下放——改標籤＝改可見範圍，屬權限管理行為。
+function canManageDocMeta(doc) {
   if (currentUser.isAdmin && isAdminView) return true;
   return !!doc.owner_email &&
     doc.owner_email.toLowerCase() === currentUser.email.toLowerCase();
@@ -825,6 +839,7 @@ window.addEventListener('DOMContentLoaded', () => {
       hrPeople = data.hrPeople || [];
       tags = data.tags || [];
       docTags = data.docTags || [];
+      editableDocIds = new Set(data.editableDocIds || []);
       rebuildTagIndexes();
       isAdminView = currentUser.isAdmin; // 管理員預設用管理視角
 
@@ -1045,7 +1060,7 @@ function setLocalDocTags(docId, tagIds) {
 // ============================================================
 function initModalTagSelect(docId, isEdit) {
   modalTagEditable = isEdit
-    ? canEditDoc(allDocs.find(d => d.doc_id === docId) || {})
+    ? canManageDocMeta(allDocs.find(d => d.doc_id === docId) || {})  // V5：edit 授權者不可貼標
     : currentUser.isWhitelisted;              // 新建者即負責人，可貼標
   modalTagIdsOriginal = isEdit ? (docTagIds[docId] || []).slice() : [];
   modalTagIds = modalTagIdsOriginal.slice();
@@ -1575,6 +1590,12 @@ function openDocModal(docId) {
     ownerSel.value = (currentUser.email || '').toLowerCase();
   }
 
+  // V5：edit 授權者可改內容，但不可更換負責人（權限管理行為，後端亦有斷言）
+  const ownerLocked = isEdit && !canManageDocMeta(doc);
+  ownerSel.disabled = ownerLocked;
+  document.getElementById('f_owner').readOnly = ownerLocked;
+  document.getElementById('f_owner_email').readOnly = ownerLocked;
+
   initModalTagSelect(docId, isEdit);
   openModalWithGuard('docModal');
 }
@@ -2000,6 +2021,7 @@ function resyncData(cb) {
       allDocs = data.docs || [];
       tags = data.tags || [];
       docTags = data.docTags || [];
+      editableDocIds = new Set(data.editableDocIds || []);
       if (data.user && Array.isArray(data.user.grantedTagIds)) {
         currentUser.grantedTagIds = data.user.grantedTagIds;
       }
