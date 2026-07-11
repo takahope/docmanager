@@ -2236,6 +2236,7 @@ function saveGrants() {
 let orgOptionsCache = null;   // {orgs:[{code,name,level,parentCode}], titles:[...]}
 let groupGrantsCache = null;  // [{org_code, org_name, title, tag_id}]
 let ggChecked = {};           // 目前 (org,title) 組合勾選中的 tag_id → true
+let ggComboList = [];         // renderGroupGrantList 填入；編輯/刪除按鈕以數字索引引用（避免字串內插 XSS）
 
 function loadOrgOptions(cb) {
   google.script.run
@@ -2373,12 +2374,14 @@ function renderGroupGrantList() {
   }
   const combos = {};
   list.forEach(g => {
-    const key = g.org_code + ' ' + g.title;
+    const key = JSON.stringify([g.org_code, g.title]); // 無碰撞鍵（org/title 可能含空白）
     if (!combos[key]) combos[key] = { org_code: g.org_code, org_name: g.org_name, title: g.title, tagIds: [] };
     combos[key].tagIds.push(g.tag_id);
   });
-  host.innerHTML = Object.keys(combos).map(key => {
-    const cb = combos[key];
+  // 按鈕以「數字索引」引用組合，絕不把 org_code/title 塞進 onclick 字串
+  // （escapeHtml 不轉義單引號，字串內插到 onclick 會造成 JS-context XSS）。
+  ggComboList = Object.keys(combos).map(k => combos[k]);
+  host.innerHTML = ggComboList.map((cb, i) => {
     const orgLabel = cb.org_code ? `${escapeHtml(cb.org_name || cb.org_code)}` : '（不限組織）';
     const ttlLabel = cb.title ? escapeHtml(cb.title) : '（不限職稱）';
     const chips = cb.tagIds.map(tid =>
@@ -2387,22 +2390,26 @@ function renderGroupGrantList() {
       <div><strong>${orgLabel}</strong>／${ttlLabel}</div>
       <div style="margin:4px 0">${chips}</div>
       <div>
-        <button class="btn-export" onclick="editGroupGrant('${escapeHtml(cb.org_code)}','${escapeHtml(cb.title)}')">編輯</button>
-        <button class="btn-export" onclick="deleteGroupGrant('${escapeHtml(cb.org_code)}','${escapeHtml(cb.title)}')">刪除</button>
+        <button class="btn-export" onclick="editGroupGrant(${i})">編輯</button>
+        <button class="btn-export" onclick="deleteGroupGrant(${i})">刪除</button>
       </div>
     </div>`;
   }).join('');
 }
 
-function editGroupGrant(orgCode, title) {
-  document.getElementById('ggOrgSelect').value = orgCode;
-  document.getElementById('ggTitleSelect').value = title;
+function editGroupGrant(idx) {
+  const cb = ggComboList[idx];
+  if (!cb) return;
+  document.getElementById('ggOrgSelect').value = cb.org_code;
+  document.getElementById('ggTitleSelect').value = cb.title;
   onGgComboChange();
 }
 
-function deleteGroupGrant(orgCode, title) {
-  const orgLabel = orgCode || '（不限組織）';
-  const ttlLabel = title || '（不限職稱）';
+function deleteGroupGrant(idx) {
+  const cb = ggComboList[idx];
+  if (!cb) return;
+  const orgLabel = cb.org_code || '（不限組織）';
+  const ttlLabel = cb.title || '（不限職稱）';
   if (!confirm(`確定刪除群組授權「${orgLabel}／${ttlLabel}」的全部標籤？該群組成員將失去對應可見性。`)) return;
   showLoading(true);
   google.script.run
@@ -2414,7 +2421,7 @@ function deleteGroupGrant(orgCode, title) {
       showToast('已刪除群組授權');
     })
     .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
-    .apiSetGroupGrants(orgCode, title, []);
+    .apiSetGroupGrants(cb.org_code, cb.title, []);
 }
 
 // ============================================================
