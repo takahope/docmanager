@@ -137,15 +137,25 @@ function _assertWhitelisted() {
   return ctx;
 }
 
-// 可編輯此文件？管理員一律可；文件負責人限自己負責的文件。
+// 可編輯此文件？管理員／負責人／具 edit 標籤授權者（V5）。
+// 以 _getEditableDocIds 為唯一事實來源；訊息不洩漏文件是否存在。
 function _assertCanEditDoc(docId) {
   const ctx = _assertWhitelisted();
-  if (ctx.isAdmin) return ctx;
+  const editable = _getEditableDocIds(ctx);
+  if (!editable.has(docId)) {
+    throw new Error('無存取權限：找不到文件或您沒有編輯此文件的權限');
+  }
+  return ctx;
+}
 
+// 僅管理員或文件負責人（V5）：貼標籤、更換負責人等「權限管理行為」用。
+// edit 標籤授權者不在此列——改標籤＝改可見範圍，不隨 edit 權下放。
+function _assertOwnerOrAdmin(docId) {
+  const ctx = _assertWhitelisted();
+  if (ctx.isAdmin) return ctx;
   const doc = _readDocs().find(d => d.doc_id === docId);
-  if (!doc) throw new Error('找不到文件：' + docId);
-  if (String(doc.owner_email).toLowerCase() !== ctx.email) {
-    throw new Error('權限不足：只有管理員或文件負責人可以編輯此文件');
+  if (!doc || String(doc.owner_email || '').toLowerCase() !== ctx.email) {
+    throw new Error('無存取權限：找不到文件或您沒有管理此文件的權限');
   }
   return ctx;
 }
@@ -188,19 +198,25 @@ function _readDocTags() {
     }));
 }
 
-// 讀取「使用者授權」→ [{email, tag_id}]（email 一律小寫）
+// permission 值正規化：只認 'edit'，其他（含空白/未遷移缺欄/打錯字）一律 'read'。
+function _normPermission(v) {
+  return String(v || '').trim().toLowerCase() === 'edit' ? 'edit' : 'read';
+}
+
+// 讀取「使用者授權」→ [{email, tag_id, permission}]（email 一律小寫；V5：多讀 permission，未遷移舊表缺欄自動落回 read）
 function _readGrants() {
   const sheet = _getSheet(SHEET_NAMES.GRANTS);
   const rows = sheet.getDataRange().getDisplayValues();
   return rows.slice(1)
     .filter(r => r[GRANT_COL.EMAIL] && r[GRANT_COL.TAG_ID])
     .map(r => ({
-      email:  String(r[GRANT_COL.EMAIL]).trim().toLowerCase(),
-      tag_id: r[GRANT_COL.TAG_ID],
+      email:      String(r[GRANT_COL.EMAIL]).trim().toLowerCase(),
+      tag_id:     r[GRANT_COL.TAG_ID],
+      permission: _normPermission(r[GRANT_COL.PERMISSION]),
     }));
 }
 
-// 讀取「群組授權」→ [{org_code, title, tag_id}]（V4）。
+// 讀取「群組授權」→ [{org_code, title, tag_id, permission}]（V4；V5：多讀 permission，未遷移舊表缺欄自動落回 read）。
 // 表不存在（尚未 migrateV4）視為無群組授權，不阻斷既有功能。
 function _readGroupGrants() {
   const ss = SpreadsheetApp.openById(ENV.SPREADSHEET_ID);
@@ -211,9 +227,10 @@ function _readGroupGrants() {
     .filter(r => r[GROUPGRANT_COL.TAG_ID] &&
                  (r[GROUPGRANT_COL.ORG_CODE] || r[GROUPGRANT_COL.TITLE]))
     .map(r => ({
-      org_code: String(r[GROUPGRANT_COL.ORG_CODE]).trim(),
-      title:    String(r[GROUPGRANT_COL.TITLE]).trim(),
-      tag_id:   r[GROUPGRANT_COL.TAG_ID],
+      org_code:   String(r[GROUPGRANT_COL.ORG_CODE]).trim(),
+      title:      String(r[GROUPGRANT_COL.TITLE]).trim(),
+      tag_id:     r[GROUPGRANT_COL.TAG_ID],
+      permission: _normPermission(r[GROUPGRANT_COL.PERMISSION]),
     }));
 }
 
@@ -237,15 +254,21 @@ function _groupGrantHits(email) {
   return hits;
 }
 
-// ── 有效授權標籤收集（V4）：個人授權 ∪ 群組授權 ─────────────
-// 回傳「未經標籤子樹展開」的 tag_id Set；展開由呼叫端做。
+// ── 有效授權標籤收集（V4 個人∪群組；V5 分級）────────────────
+// 回傳 { read: Set, edit: Set }（皆未經標籤子樹展開；展開由呼叫端做）。
+// read 集合＝read ∪ edit（edit 蘊含 read），可直接作為可見性授權集。
 function _getEffectiveGrantedTagIds(ctx) {
   const email = ctx ? String(ctx.email || '').toLowerCase() : '';
-  const granted = new Set();
-  if (!email) return granted;
-  _readGrants().forEach(g => { if (g.email === email) granted.add(g.tag_id); });
-  _groupGrantHits(email).forEach(gg => granted.add(gg.tag_id));
-  return granted;
+  const read = new Set();
+  const edit = new Set();
+  if (!email) return { read: read, edit: edit };
+  const collect = g => {
+    read.add(g.tag_id);
+    if (g.permission === 'edit') edit.add(g.tag_id);
+  };
+  _readGrants().forEach(g => { if (g.email === email) collect(g); });
+  _groupGrantHits(email).forEach(collect);
+  return { read: read, edit: edit };
 }
 
 // 把一組標籤展開為「含全部子孫」的 tag_id 集合（BFS on parent_id）。
@@ -283,7 +306,7 @@ function _getVisibleDocIds(ctx) {
   const email = ctx ? String(ctx.email || '').toLowerCase() : '';
 
   // 使用者被授權的標籤（個人 ∪ 群組）→ 展開子孫
-  const grantedTagIds = Array.from(_getEffectiveGrantedTagIds(ctx));
+  const grantedTagIds = Array.from(_getEffectiveGrantedTagIds(ctx).read);
   const grantedExpanded = _expandTagWithDescendants(grantedTagIds, _readTags());
 
   // doc_id → [tag_id...]
@@ -308,6 +331,50 @@ function _getVisibleDocIds(ctx) {
     // 規則 4：無標籤文件不加入（deny by default）
   });
   return visible;
+}
+
+// 【唯一可編輯性事實來源】回傳當前使用者可編輯的 doc_id 集合（Set）。
+//   1. 管理員 → 全部文件
+//   2. 自己是 owner_email 的文件 → 可編輯
+//   3. 文件的任一標籤 ∈ 使用者 edit 授權標籤的子孫展開集 → 可編輯
+//   4. 無標籤文件 → 僅落入規則 1、2（deny by default）
+// 恆為 _getVisibleDocIds 的子集合（edit 蘊含 read）。
+// 所有寫入型 API 一律經 _assertCanEditDoc（查本集合）或更嚴的
+// _assertOwnerOrAdmin／_assertAdmin 把關，不得繞過。
+function _getEditableDocIds(ctx) {
+  const docs = _readDocs();
+  if (ctx && ctx.isAdmin) {
+    return new Set(docs.map(d => d.doc_id));
+  }
+
+  const email = ctx ? String(ctx.email || '').toLowerCase() : '';
+
+  // 使用者被授權「可編輯」的標籤（個人 ∪ 群組）→ 展開子孫
+  const editTagIds = Array.from(_getEffectiveGrantedTagIds(ctx).edit);
+  const editExpanded = _expandTagWithDescendants(editTagIds, _readTags());
+
+  // doc_id → [tag_id...]
+  const docTagMap = new Map();
+  _readDocTags().forEach(dt => {
+    if (!docTagMap.has(dt.doc_id)) docTagMap.set(dt.doc_id, []);
+    docTagMap.get(dt.doc_id).push(dt.tag_id);
+  });
+
+  const editable = new Set();
+  docs.forEach(d => {
+    // 規則 2：文件負責人
+    if (email && String(d.owner_email || '').toLowerCase() === email) {
+      editable.add(d.doc_id);
+      return;
+    }
+    // 規則 3：任一標籤落在 edit 授權子孫集
+    const tags = docTagMap.get(d.doc_id) || [];
+    if (tags.some(t => editExpanded.has(t))) {
+      editable.add(d.doc_id);
+    }
+    // 規則 4：無標籤文件不加入（deny by default）
+  });
+  return editable;
 }
 
 // 單文件可見性檢查（apiGetDocHistory、祖先/子孫查詢入口用）。

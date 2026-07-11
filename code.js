@@ -131,8 +131,8 @@ function apiGetInitData() {
   }));
   // 文件標籤：僅回傳可見文件的貼標，避免經由標籤推知不可見文件存在
   const docTags = _readDocTags().filter(dt => visible.has(dt.doc_id));
-  // 當前使用者的有效授權標籤（個人∪群組；前端資料夾樹用，管理員不受此限）
-  const grantedTagIds = Array.from(_getEffectiveGrantedTagIds(ctx));
+  // 當前使用者的有效授權標籤（個人∪群組，read 含 edit；前端資料夾樹用）
+  const grantedTagIds = Array.from(_getEffectiveGrantedTagIds(ctx).read);
 
   return {
     docs: docs,
