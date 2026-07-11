@@ -123,24 +123,27 @@ const DOCTAG_COL = {
 };
 const DOCTAG_COL_COUNT = 2;
 
-// ── 使用者授權欄位索引（0-based）（V3）──────────────────────
-// 純標籤授權，一列一組 (email, tag_id)；email 小寫。
+// ── 使用者授權欄位索引（0-based）（V3；V5 加 permission）────
+// 純標籤授權，一列一組 (email, tag_id, permission)；email 小寫。
+// permission：'edit' 或 'read'；空白／其他值一律視為 read（fail-closed）。
 const GRANT_COL = {
-  EMAIL:  0,  // A: email（小寫）
-  TAG_ID: 1,  // B: tag_id
+  EMAIL:      0,  // A: email（小寫）
+  TAG_ID:     1,  // B: tag_id
+  PERMISSION: 2,  // C: permission（read/edit；空白＝read）
 };
-const GRANT_COL_COUNT = 2;
+const GRANT_COL_COUNT = 3;
 
-// ── 群組授權欄位索引（0-based）（V4）────────────────────────
+// ── 群組授權欄位索引（0-based）（V4；V5 加 permission 欄）────
 // (org_code, title) 至少一欄非空；一列一組授權。
 // org_code 精確比對職務配置（僅直屬成員，不含子單位——與標籤樹的
 // 父含子繼承「相反」，這是設計定案，勿順手改成展開子樹）。
 const GROUPGRANT_COL = {
-  ORG_CODE: 0,  // A: org_code（HR 組織架構樹.代碼；可空）
-  TITLE:    1,  // B: title（HR 人員職務配置.職稱；可空）
-  TAG_ID:   2,  // C: tag_id（標籤主檔）
+  ORG_CODE:   0,  // A: org_code（HR 組織架構樹.代碼；可空）
+  TITLE:      1,  // B: title（HR 人員職務配置.職稱；可空）
+  TAG_ID:     2,  // C: tag_id（標籤主檔）
+  PERMISSION: 3,  // D: permission（read/edit；空白＝read）（V5）
 };
-const GROUPGRANT_COL_COUNT = 3;
+const GROUPGRANT_COL_COUNT = 4;
 
 // ── 文件狀態選項 ──────────────────────────────────────────────
 const DOC_STATUS = ['草稿', '審核中', '已發布', '已廢止'];

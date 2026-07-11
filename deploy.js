@@ -285,20 +285,20 @@ function _deployDocTagSheet(ss) {
 function _deployGrantSheet(ss) {
   const sheet = _deployV3Sheet(
     ss, SHEET_NAMES.GRANTS,
-    ['email', 'tag_id'],
-    ['A', 'B'], '#5c4a2d');
-  const colWidths = [260, 140];
+    ['email', 'tag_id', 'permission'],
+    ['A', 'B', 'C'], '#5c4a2d');
+  const colWidths = [260, 140, 100];
   colWidths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
   Logger.log(`✅ ${SHEET_NAMES.GRANTS} 初始化完成`);
 }
 
-// ── 建立「群組授權」工作表（V4）───────────────────────────────
+// ── 建立「群組授權」工作表（V4；V5 加 permission 欄）─────────
 function _deployGroupGrantSheet(ss) {
   const sheet = _deployV3Sheet(
     ss, SHEET_NAMES.GROUP_GRANTS,
-    ['org_code', 'title', 'tag_id'],
-    ['A', 'B', 'C'], '#2d5c4a');
-  const colWidths = [160, 160, 140];
+    ['org_code', 'title', 'tag_id', 'permission'],
+    ['A', 'B', 'C', 'D'], '#2d5c4a');
+  const colWidths = [160, 160, 140, 100];
   colWidths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
   Logger.log(`✅ ${SHEET_NAMES.GROUP_GRANTS} 初始化完成`);
 }
@@ -310,6 +310,40 @@ function migrateV4() {
   _deployGroupGrantSheet(ss);
   SpreadsheetApp.flush();
   Logger.log('✅ migrateV4 完成（群組授權）');
+}
+
+// ── V4 → V5 遷移：兩張授權表補 permission 欄 ─────────────────
+// 冪等設計：表頭已存在就跳過。空白 permission 由讀取端視為 read，
+// 先跑本函式或先部署程式碼皆安全，無需資料搬遷。
+function migrateV6() {
+  const ss = SpreadsheetApp.openById(ENV.SPREADSHEET_ID);
+  const targets = [
+    { name: SHEET_NAMES.GRANTS,       col: GRANT_COL.PERMISSION + 1,      bg: '#5c4a2d' },
+    { name: SHEET_NAMES.GROUP_GRANTS, col: GROUPGRANT_COL.PERMISSION + 1, bg: '#2d5c4a' },
+  ];
+  targets.forEach(t => {
+    const sheet = ss.getSheetByName(t.name);
+    if (!sheet) {
+      Logger.log(`找不到工作表：${t.name}，請先執行 migrateV3()/migrateV4()`);
+      return;
+    }
+    const cell = sheet.getRange(1, t.col);
+    if (cell.getValue() === 'permission') {
+      Logger.log(`欄位已存在，跳過：${t.name}.permission`);
+      return;
+    }
+    cell.setValue('permission')
+        .setFontWeight('bold')
+        .setBackground(t.bg)
+        .setFontColor('#ffffff');
+    // permission 欄強制文字格式，與其他授權欄一致
+    const letter = String.fromCharCode(64 + t.col); // C 或 D
+    sheet.getRange(`${letter}:${letter}`).setNumberFormat('@');
+    sheet.setColumnWidth(t.col, 100);
+    Logger.log(`✅ 補上欄位：${t.name}.permission`);
+  });
+  SpreadsheetApp.flush();
+  Logger.log('✅ migrateV6 完成（授權表 permission 欄）');
 }
 
 // ── 寫入測試資料（選用）──────────────────────────────────────
