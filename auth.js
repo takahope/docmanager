@@ -13,6 +13,8 @@
 
 const HR_CACHE_KEY = 'hr_people_v1';
 const HR_CACHE_SECONDS = 600; // 10 分鐘：白名單檢查頻繁，避免每次跨表整表讀取
+const HR_ORG_CACHE_KEY = 'hr_orgtree_v1';    // V4：組織架構樹
+const HR_ASSIGN_CACHE_KEY = 'hr_assign_v1';  // V4：人員職務配置
 
 function _getProp(key) {
   return PropertiesService.getScriptProperties().getProperty(key) || '';
@@ -43,6 +45,55 @@ function _getHrPeople() {
 
   cache.put(HR_CACHE_KEY, JSON.stringify(people), HR_CACHE_SECONDS);
   return people;
+}
+
+// ── HR 組織架構樹（V4 群組授權用）────────────────────────────
+// 回傳 [{code, name, level, parentCode}]，快取 10 分鐘。
+function _getHrOrgTree() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(HR_ORG_CACHE_KEY);
+  if (cached) return JSON.parse(cached);
+
+  const hrId = _getProp(PROP_KEYS.HR_SPREADSHEET_ID);
+  if (!hrId) throw new Error('尚未設定 Script Properties：HR_SPREADSHEET_ID');
+  const sheet = SpreadsheetApp.openById(hrId).getSheetByName(HR_ORG_SHEET_NAME);
+  if (!sheet) throw new Error(`HR 主表找不到工作表：${HR_ORG_SHEET_NAME}`);
+
+  const rows = sheet.getDataRange().getDisplayValues();
+  const orgs = rows.slice(1)
+    .filter(r => r[HR_ORG_COL.CODE])
+    .map(r => ({
+      code:       String(r[HR_ORG_COL.CODE]).trim(),
+      name:       String(r[HR_ORG_COL.NAME]).trim(),
+      level:      parseInt(r[HR_ORG_COL.LEVEL], 10) || 0,
+      parentCode: String(r[HR_ORG_COL.PARENT_CODE]).trim(),
+    }));
+  cache.put(HR_ORG_CACHE_KEY, JSON.stringify(orgs), HR_CACHE_SECONDS);
+  return orgs;
+}
+
+// ── HR 人員職務配置（V4 群組授權用）──────────────────────────
+// 回傳 [{email, orgCode, title}]；矩陣兼任＝一人多列。快取 10 分鐘。
+function _getHrAssignments() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(HR_ASSIGN_CACHE_KEY);
+  if (cached) return JSON.parse(cached);
+
+  const hrId = _getProp(PROP_KEYS.HR_SPREADSHEET_ID);
+  if (!hrId) throw new Error('尚未設定 Script Properties：HR_SPREADSHEET_ID');
+  const sheet = SpreadsheetApp.openById(hrId).getSheetByName(HR_ASSIGN_SHEET_NAME);
+  if (!sheet) throw new Error(`HR 主表找不到工作表：${HR_ASSIGN_SHEET_NAME}`);
+
+  const rows = sheet.getDataRange().getDisplayValues();
+  const assigns = rows.slice(1)
+    .filter(r => r[HR_ASSIGN_COL.EMAIL] && r[HR_ASSIGN_COL.ORG_CODE])
+    .map(r => ({
+      email:   String(r[HR_ASSIGN_COL.EMAIL]).trim().toLowerCase(),
+      orgCode: String(r[HR_ASSIGN_COL.ORG_CODE]).trim(),
+      title:   String(r[HR_ASSIGN_COL.TITLE]).trim(),
+    }));
+  cache.put(HR_ASSIGN_CACHE_KEY, JSON.stringify(assigns), HR_CACHE_SECONDS);
+  return assigns;
 }
 
 function _getAdminEmails() {
@@ -149,6 +200,54 @@ function _readGrants() {
     }));
 }
 
+// 讀取「群組授權」→ [{org_code, title, tag_id}]（V4）。
+// 表不存在（尚未 migrateV4）視為無群組授權，不阻斷既有功能。
+function _readGroupGrants() {
+  const ss = SpreadsheetApp.openById(ENV.SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_NAMES.GROUP_GRANTS);
+  if (!sheet) return [];
+  const rows = sheet.getDataRange().getDisplayValues();
+  return rows.slice(1)
+    .filter(r => r[GROUPGRANT_COL.TAG_ID] &&
+                 (r[GROUPGRANT_COL.ORG_CODE] || r[GROUPGRANT_COL.TITLE]))
+    .map(r => ({
+      org_code: String(r[GROUPGRANT_COL.ORG_CODE]).trim(),
+      title:    String(r[GROUPGRANT_COL.TITLE]).trim(),
+      tag_id:   r[GROUPGRANT_COL.TAG_ID],
+    }));
+}
+
+// 使用者的職務配置命中的群組授權列（V4）。
+// 比對規則：對每一列職務配置 × 每一列群組授權，
+//   org_code 空或 === 配置 orgCode，且 title 空或 === 配置 title → 命中。
+// org_code 精確比對（僅直屬成員，不展開組織子樹——設計定案）。
+// 回傳命中列（tag_id 可能重複，由呼叫端去重）。
+function _groupGrantHits(email) {
+  const groupGrants = _readGroupGrants();
+  if (groupGrants.length === 0) return [];
+  const myAssigns = _getHrAssignments().filter(a => a.email === email);
+  const hits = [];
+  myAssigns.forEach(a => {
+    groupGrants.forEach(gg => {
+      const orgHit = !gg.org_code || gg.org_code === a.orgCode;
+      const titleHit = !gg.title || gg.title === a.title;
+      if (orgHit && titleHit) hits.push(gg);
+    });
+  });
+  return hits;
+}
+
+// ── 有效授權標籤收集（V4）：個人授權 ∪ 群組授權 ─────────────
+// 回傳「未經標籤子樹展開」的 tag_id Set；展開由呼叫端做。
+function _getEffectiveGrantedTagIds(ctx) {
+  const email = ctx ? String(ctx.email || '').toLowerCase() : '';
+  const granted = new Set();
+  if (!email) return granted;
+  _readGrants().forEach(g => { if (g.email === email) granted.add(g.tag_id); });
+  _groupGrantHits(email).forEach(gg => granted.add(gg.tag_id));
+  return granted;
+}
+
 // 把一組標籤展開為「含全部子孫」的 tag_id 集合（BFS on parent_id）。
 // 授權父標籤即涵蓋整棵子樹，這裡即實現「父含子」的樹狀繼承。
 function _expandTagWithDescendants(tagIds, allTags) {
@@ -183,10 +282,8 @@ function _getVisibleDocIds(ctx) {
 
   const email = ctx ? String(ctx.email || '').toLowerCase() : '';
 
-  // 使用者被授權的標籤 → 展開子孫
-  const grantedTagIds = _readGrants()
-    .filter(g => g.email === email)
-    .map(g => g.tag_id);
+  // 使用者被授權的標籤（個人 ∪ 群組）→ 展開子孫
+  const grantedTagIds = Array.from(_getEffectiveGrantedTagIds(ctx));
   const grantedExpanded = _expandTagWithDescendants(grantedTagIds, _readTags());
 
   // doc_id → [tag_id...]
@@ -226,10 +323,13 @@ function _assertCanViewDoc(docId) {
 
 // ── 管理員工具 ────────────────────────────────────────────────
 
-// 清除 HR 名單快取（HR 主表更新後可手動執行，或等 10 分鐘自動過期）
+// 清除 HR 快取（HR 主表更新後可手動執行，或等 10 分鐘自動過期）
 function clearHrCache() {
-  CacheService.getScriptCache().remove(HR_CACHE_KEY);
-  Logger.log('✅ HR 名單快取已清除');
+  const cache = CacheService.getScriptCache();
+  cache.remove(HR_CACHE_KEY);
+  cache.remove(HR_ORG_CACHE_KEY);
+  cache.remove(HR_ASSIGN_CACHE_KEY);
+  Logger.log('✅ HR 快取已清除（人員名單 / 組織架構樹 / 職務配置）');
 }
 
 // 新增 HR 試算表讀取 scope 後，在 GAS 編輯器手動執行一次以觸發授權
@@ -260,6 +360,20 @@ function debugGetSystemData() {
   }
   const headers = sheet.getRange(1, 1, 1, 5).getDisplayValues()[0];
   Logger.log(`人員主檔表頭（前 5 欄）：${JSON.stringify(headers)}`);
+
+  const ss = SpreadsheetApp.openById(hrId);
+  const orgSheet = ss.getSheetByName(HR_ORG_SHEET_NAME);
+  if (orgSheet) {
+    Logger.log(`組織架構樹表頭（前 8 欄）：${JSON.stringify(orgSheet.getRange(1, 1, 1, 8).getDisplayValues()[0])}`);
+  } else {
+    Logger.log(`⚠️ HR 主表找不到工作表：${HR_ORG_SHEET_NAME}`);
+  }
+  const asgSheet = ss.getSheetByName(HR_ASSIGN_SHEET_NAME);
+  if (asgSheet) {
+    Logger.log(`人員職務配置表頭（前 7 欄）：${JSON.stringify(asgSheet.getRange(1, 1, 1, 7).getDisplayValues()[0])}`);
+  } else {
+    Logger.log(`⚠️ HR 主表找不到工作表：${HR_ASSIGN_SHEET_NAME}`);
+  }
 
   clearHrCache();
   const people = _getHrPeople();
