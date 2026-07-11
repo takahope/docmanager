@@ -808,8 +808,28 @@ function apiDeleteTag(tagId) {
   }
 }
 
-// 整組覆寫某使用者的標籤授權（僅管理員）。
-function apiSetUserGrants(email, tagIds) {
+// 授權項參數正規化（V5）：接受 [{tagId, permission}]（字串項視為 read 舊格式），
+// 同 tagId 去重取最高權限，僅保留既有標籤。
+function _normGrantItems(grants) {
+  const validTagIds = new Set(_readTags().map(t => t.tag_id));
+  const byTag = {};
+  (grants || []).forEach(g => {
+    const isObj = !!g && typeof g === 'object';
+    const tagId = String(isObj ? (g.tagId || '') : (g || '')).trim();
+    if (!tagId || !validTagIds.has(tagId)) return;
+    const perm = _normPermission(isObj ? g.permission : '');
+    if (perm === 'edit' || !byTag[tagId]) byTag[tagId] = perm;
+  });
+  return Object.keys(byTag).map(t => ({ tagId: t, permission: byTag[t] }));
+}
+
+// 授權項的稽核摘要標示（edit 才標註，read 為預設不贅述）
+function _grantAuditLabel(items) {
+  return items.map(i => i.permission === 'edit' ? `${i.tagId}（編輯）` : i.tagId).join(', ');
+}
+
+// 整組覆寫某使用者的標籤授權（僅管理員）。V5：grants=[{tagId, permission}]。
+function apiSetUserGrants(email, grants) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
@@ -818,9 +838,7 @@ function apiSetUserGrants(email, tagIds) {
     const target = String(email || '').trim().toLowerCase();
     if (!target) return { success: false, error: '未指定使用者信箱' };
 
-    const validTagIds = new Set(_readTags().map(t => t.tag_id));
-    const wanted = Array.from(new Set((tagIds || []).map(String).filter(Boolean)))
-      .filter(t => validTagIds.has(t));
+    const items = _normGrantItems(grants);
 
     const sheet = _getSheet(SHEET_NAMES.GRANTS);
     const rows = sheet.getDataRange().getDisplayValues();
@@ -831,16 +849,16 @@ function apiSetUserGrants(email, tagIds) {
       }
     }
     // 寫入新授權
-    if (wanted.length > 0) {
-      const newRows = wanted.map(t => [target, t]);
+    if (items.length > 0) {
+      const newRows = items.map(it => [target, it.tagId, it.permission]);
       sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, GRANT_COL_COUNT)
         .setValues(newRows);
     }
 
     _logAudit('授權', '', '',
-      `設定 ${target} 授權標籤：${wanted.join(', ') || '（清空）'}`);
+      `設定 ${target} 授權標籤：${_grantAuditLabel(items) || '（清空）'}`);
     SpreadsheetApp.flush();
-    return { success: true, email: target, tagIds: wanted };
+    return { success: true, email: target, grants: items };
   } catch (e) {
     return { success: false, error: String(e.message || e) };
   } finally {
@@ -849,15 +867,15 @@ function apiSetUserGrants(email, tagIds) {
 }
 
 // 取得所有使用者授權（僅管理員；供權限管理分頁）。
-// 回傳 [{email, tagIds:[...]}]。讀取型 API：失敗直接 throw 給前端失敗處理器。
+// V5 回傳 [{email, grants:[{tagId, permission}]}]。讀取型：失敗直接 throw。
 function apiGetAllGrants() {
   _assertAdmin();
   const map = {};
   _readGrants().forEach(g => {
     if (!map[g.email]) map[g.email] = [];
-    map[g.email].push(g.tag_id);
+    map[g.email].push({ tagId: g.tag_id, permission: g.permission });
   });
-  return Object.keys(map).map(email => ({ email: email, tagIds: map[email] }));
+  return Object.keys(map).map(email => ({ email: email, grants: map[email] }));
 }
 
 // ============================================================
@@ -876,11 +894,12 @@ function apiGetGroupGrants() {
     org_name: g.org_code ? (orgNameByCode[g.org_code] || '（查無組織）') : '',
     title:    g.title,
     tag_id:   g.tag_id,
+    permission: g.permission,
   }));
 }
 
-// 整組覆寫 (orgCode, title) 組合的授權標籤；tagIds=[] 即刪除該組合。
-function apiSetGroupGrants(orgCode, title, tagIds) {
+// 整組覆寫 (orgCode, title) 組合的授權；grants=[] 即刪除該組合（V5 帶 permission）。
+function apiSetGroupGrants(orgCode, title, grants) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
@@ -890,9 +909,7 @@ function apiSetGroupGrants(orgCode, title, tagIds) {
     const ttl = String(title || '').trim();
     if (!org && !ttl) return { success: false, error: '組織與職稱至少擇一' };
 
-    const validTagIds = new Set(_readTags().map(t => t.tag_id));
-    const wanted = Array.from(new Set((tagIds || []).map(String).filter(Boolean)))
-      .filter(t => validTagIds.has(t));
+    const items = _normGrantItems(grants);
 
     const sheet = _getSheet(SHEET_NAMES.GROUP_GRANTS);
     const rows = sheet.getDataRange().getDisplayValues();
@@ -903,17 +920,17 @@ function apiSetGroupGrants(orgCode, title, tagIds) {
         sheet.deleteRow(i + 1);
       }
     }
-    if (wanted.length > 0) {
-      const newRows = wanted.map(t => [org, ttl, t]);
+    if (items.length > 0) {
+      const newRows = items.map(it => [org, ttl, it.tagId, it.permission]);
       sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, GROUPGRANT_COL_COUNT)
         .setValues(newRows);
     }
 
     const label = `${org || '（不限組織）'}／${ttl || '（不限職稱）'}`;
     _logAudit('授權', '', '',
-      `設定群組授權 ${label} → ${wanted.join(', ') || '（清空）'}`);
+      `設定群組授權 ${label} → ${_grantAuditLabel(items) || '（清空）'}`);
     SpreadsheetApp.flush();
-    return { success: true, org_code: org, title: ttl, tagIds: wanted };
+    return { success: true, org_code: org, title: ttl, grants: items };
   } catch (e) {
     return { success: false, error: String(e.message || e) };
   } finally {
@@ -931,21 +948,23 @@ function apiGetOrgOptions() {
   return { orgs: orgs, titles: titles };
 }
 
-// 有效權限預覽：某使用者最終取得的標籤與來源（僅管理員）。
+// 有效權限預覽：某使用者最終取得的標籤、最高權限與各來源（僅管理員）。
 // 在後端計算，避免把全公司職務配置送到前端。
 function apiPreviewUserTags(email) {
   _assertAdmin();
   const target = String(email || '').trim().toLowerCase();
   if (!target) return [];
 
-  const results = [];
-  const seen = new Set();
+  const byTag = {};   // tag_id → { permission, sources: [] }
+  const add = (tagId, permission, source) => {
+    if (!byTag[tagId]) byTag[tagId] = { permission: 'read', sources: [] };
+    if (permission === 'edit') byTag[tagId].permission = 'edit';
+    const label = source + (permission === 'edit' ? '（編輯）' : '（讀取）');
+    if (byTag[tagId].sources.indexOf(label) < 0) byTag[tagId].sources.push(label);
+  };
 
   _readGrants().forEach(g => {
-    if (g.email === target && !seen.has(g.tag_id)) {
-      seen.add(g.tag_id);
-      results.push({ tag_id: g.tag_id, source: '個人授權' });
-    }
+    if (g.email === target) add(g.tag_id, g.permission, '個人授權');
   });
 
   const hits = _groupGrantHits(target);
@@ -953,15 +972,15 @@ function apiPreviewUserTags(email) {
     const orgNameByCode = {};
     _getHrOrgTree().forEach(o => { orgNameByCode[o.code] = o.name; });
     hits.forEach(gg => {
-      if (seen.has(gg.tag_id)) return;
-      seen.add(gg.tag_id);
       const orgLabel = gg.org_code
         ? (orgNameByCode[gg.org_code] || gg.org_code) : '不限組織';
-      results.push({
-        tag_id: gg.tag_id,
-        source: `群組授權：${orgLabel}／${gg.title || '不限職稱'}`,
-      });
+      add(gg.tag_id, gg.permission, `群組授權：${orgLabel}／${gg.title || '不限職稱'}`);
     });
   }
-  return results;
+
+  return Object.keys(byTag).map(tagId => ({
+    tag_id: tagId,
+    permission: byTag[tagId].permission,
+    sources: byTag[tagId].sources,
+  }));
 }
