@@ -507,6 +507,49 @@
         </div>
       </div>
     </div>
+    <div class="admin-cols" style="margin-top:16px">
+      <!-- 左：群組授權（V4） -->
+      <div class="card">
+        <div class="card-header"><span>👥 群組授權</span></div>
+        <div class="card-body">
+          <div class="field-hint" style="margin-bottom:8px">⚠ 組織授權僅及該節點「直屬成員」，不含子單位成員（與標籤樹繼承不同）。組織與職稱至少擇一。</div>
+          <div class="form-group">
+            <label>組織節點</label>
+            <select id="ggOrgSelect" onchange="onGgComboChange()">
+              <option value="">（不限組織）</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>職稱</label>
+            <select id="ggTitleSelect" onchange="onGgComboChange()">
+              <option value="">（不限職稱）</option>
+            </select>
+          </div>
+          <div id="ggTagTree"><div class="grant-hint">請先選擇組織或職稱。</div></div>
+          <div class="detail-actions" id="ggSaveWrap" style="display:none">
+            <button class="btn-primary" onclick="saveGroupGrants()">儲存群組授權</button>
+          </div>
+          <div style="margin-top:16px">
+            <div class="field-hint" style="margin-bottom:4px">現有群組授權</div>
+            <div id="ggList"><div class="grant-hint">載入中…</div></div>
+          </div>
+        </div>
+      </div>
+      <!-- 右：有效權限預覽 -->
+      <div class="card">
+        <div class="card-header"><span>🔍 有效權限預覽</span></div>
+        <div class="card-body" id="previewCardBody">
+          <div class="form-group">
+            <label>選擇人員</label>
+            <select id="previewUserSelect" onchange="onPreviewUserChange()">
+              <option value="">— 選擇人員 —</option>
+            </select>
+          </div>
+          <div class="field-hint" style="margin-bottom:8px">顯示此人最終可見的標籤與授權來源（個人授權／群組授權）。標籤子樹繼承在此清單之外另行生效。</div>
+          <div id="previewResult"><div class="grant-hint">請先選擇一位人員。</div></div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1939,6 +1982,19 @@ function renderAdminTab() {
   } else if (sel.value) {
     onGrantUserChange();
   }
+
+  // V4 有效權限預覽：人員下拉（保留目前選擇）
+  const pv = document.getElementById('previewUserSelect');
+  const keepPv = pv.value;
+  pv.innerHTML = '<option value="">— 選擇人員 —</option>' +
+    hrPeople.map(p =>
+      `<option value="${escapeHtml(p.email)}">${escapeHtml(p.name)}（${escapeHtml(p.email)}）</option>`
+    ).join('');
+  pv.value = keepPv;
+
+  // V4 群組授權：首次進入分頁時載入選項與現有授權
+  if (orgOptionsCache === null) loadOrgOptions();
+  if (groupGrantsCache === null) loadGroupGrants();
 }
 
 // 重新自後端同步 tags/docTags/docs（標籤樹異動後用，確保排序與級聯正確）
@@ -2172,6 +2228,222 @@ function saveGrants() {
     })
     .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
     .apiSetUserGrants(email, explicit);
+}
+
+// ============================================================
+// 群組授權（V4，僅管理員）
+// ============================================================
+let orgOptionsCache = null;   // {orgs:[{code,name,level,parentCode}], titles:[...]}
+let groupGrantsCache = null;  // [{org_code, org_name, title, tag_id}]
+let ggChecked = {};           // 目前 (org,title) 組合勾選中的 tag_id → true
+
+function loadOrgOptions(cb) {
+  google.script.run
+    .withSuccessHandler(res => {
+      orgOptionsCache = res || { orgs: [], titles: [] };
+      const orgSel = document.getElementById('ggOrgSelect');
+      const keepOrg = orgSel.value;
+      orgSel.innerHTML = '<option value="">（不限組織）</option>' +
+        orgOptionsCache.orgs.map(o =>
+          `<option value="${escapeHtml(o.code)}">${'　'.repeat(Math.max(0, (o.level || 1) - 1))}${escapeHtml(o.name)}（${escapeHtml(o.code)}）</option>`
+        ).join('');
+      orgSel.value = keepOrg;
+      const ttlSel = document.getElementById('ggTitleSelect');
+      const keepTtl = ttlSel.value;
+      ttlSel.innerHTML = '<option value="">（不限職稱）</option>' +
+        orgOptionsCache.titles.map(t =>
+          `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`
+        ).join('');
+      ttlSel.value = keepTtl;
+      if (cb) cb();
+    })
+    .withFailureHandler(err => {
+      orgOptionsCache = { orgs: [], titles: [] };
+      showToast('組織/職稱選項載入失敗：' + err.message);
+    })
+    .apiGetOrgOptions();
+}
+
+function loadGroupGrants(cb) {
+  google.script.run
+    .withSuccessHandler(list => {
+      groupGrantsCache = list || [];
+      renderGroupGrantList();
+      if (cb) cb();
+    })
+    .withFailureHandler(err => {
+      groupGrantsCache = [];
+      renderGroupGrantList();
+      showToast('群組授權載入失敗：' + err.message);
+    })
+    .apiGetGroupGrants();
+}
+
+// 目前選擇的 (org, title) 組合
+function ggCurrentCombo() {
+  return {
+    org: document.getElementById('ggOrgSelect').value,
+    title: document.getElementById('ggTitleSelect').value,
+  };
+}
+
+function onGgComboChange() {
+  const c = ggCurrentCombo();
+  const wrap = document.getElementById('ggSaveWrap');
+  const tree = document.getElementById('ggTagTree');
+  if (!c.org && !c.title) {
+    ggChecked = {};
+    tree.innerHTML = '<div class="grant-hint">請先選擇組織或職稱。</div>';
+    wrap.style.display = 'none';
+    return;
+  }
+  if (groupGrantsCache === null) { loadGroupGrants(() => onGgComboChange()); return; }
+  ggChecked = {};
+  groupGrantsCache
+    .filter(g => g.org_code === c.org && g.title === c.title)
+    .forEach(g => { if (tagById[g.tag_id]) ggChecked[g.tag_id] = true; });
+  wrap.style.display = '';
+  renderGgTagTree();
+}
+
+// 標籤是否因上層已勾選而「已繼承」（沿用個人授權的語意）
+function isGgInherited(tagId) {
+  let cur = (tagById[tagId] || {}).parent_id || '';
+  while (cur && tagById[cur]) {
+    if (ggChecked[cur]) return true;
+    cur = tagById[cur].parent_id || '';
+  }
+  return false;
+}
+
+function renderGgTagTree() {
+  const host = document.getElementById('ggTagTree');
+  const roots = tagChildren[''] || [];
+  if (!roots.length) {
+    host.innerHTML = '<div class="grant-hint">尚無標籤可授權，請先於上方建立標籤樹。</div>';
+    return;
+  }
+  let html = '';
+  const walk = (tag, depth) => {
+    const inherited = isGgInherited(tag.tag_id);
+    const checked = (inherited || ggChecked[tag.tag_id]) ? 'checked' : '';
+    const disabled = inherited ? 'disabled' : '';
+    const badge = inherited ? '<span class="inherited-tag">已繼承</span>' : '';
+    html += `<label class="grant-opt" style="padding-left:${2 + depth * 16}px">
+      <input type="checkbox" ${checked} ${disabled} onchange="onGgToggle('${escapeHtml(tag.tag_id)}',this.checked)">
+      <span>${escapeHtml(tag.name)}</span>${badge}
+    </label>`;
+    (tagChildren[tag.tag_id] || []).forEach(ch => walk(ch, depth + 1));
+  };
+  roots.forEach(t => walk(t, 0));
+  host.innerHTML = html;
+}
+
+function onGgToggle(tagId, on) {
+  if (on) ggChecked[tagId] = true; else delete ggChecked[tagId];
+  renderGgTagTree();
+}
+
+function saveGroupGrants() {
+  const c = ggCurrentCombo();
+  if (!c.org && !c.title) { showToast('組織與職稱至少擇一'); return; }
+  // 只送「明確勾選且未被上層涵蓋」的最小授權集合
+  const explicit = Object.keys(ggChecked).filter(id => tagById[id] && !isGgInherited(id));
+
+  showLoading(true);
+  google.script.run
+    .withSuccessHandler(res => {
+      showLoading(false);
+      if (!res || !res.success) { showToast('儲存失敗：' + ((res && res.error) || '未知錯誤')); return; }
+      groupGrantsCache = null; // 授權列已變，重新載入權威資料
+      loadGroupGrants(() => onGgComboChange());
+      showToast('已儲存群組授權（' + (res.tagIds || []).length + ' 項）');
+    })
+    .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
+    .apiSetGroupGrants(c.org, c.title, explicit);
+}
+
+// 現有群組授權清單：依 (org, title) 分組顯示，可編輯/刪除
+function renderGroupGrantList() {
+  const host = document.getElementById('ggList');
+  const list = groupGrantsCache || [];
+  if (!list.length) {
+    host.innerHTML = '<div class="grant-hint">尚無群組授權。</div>';
+    return;
+  }
+  const combos = {};
+  list.forEach(g => {
+    const key = g.org_code + ' ' + g.title;
+    if (!combos[key]) combos[key] = { org_code: g.org_code, org_name: g.org_name, title: g.title, tagIds: [] };
+    combos[key].tagIds.push(g.tag_id);
+  });
+  host.innerHTML = Object.keys(combos).map(key => {
+    const cb = combos[key];
+    const orgLabel = cb.org_code ? `${escapeHtml(cb.org_name || cb.org_code)}` : '（不限組織）';
+    const ttlLabel = cb.title ? escapeHtml(cb.title) : '（不限職稱）';
+    const chips = cb.tagIds.map(tid =>
+      `<span class="tag-chip">${escapeHtml((tagById[tid] || {}).name || tid)}</span>`).join(' ');
+    return `<div class="gg-row" style="padding:6px 0;border-bottom:1px solid #e5e7eb">
+      <div><strong>${orgLabel}</strong>／${ttlLabel}</div>
+      <div style="margin:4px 0">${chips}</div>
+      <div>
+        <button class="btn-export" onclick="editGroupGrant('${escapeHtml(cb.org_code)}','${escapeHtml(cb.title)}')">編輯</button>
+        <button class="btn-export" onclick="deleteGroupGrant('${escapeHtml(cb.org_code)}','${escapeHtml(cb.title)}')">刪除</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function editGroupGrant(orgCode, title) {
+  document.getElementById('ggOrgSelect').value = orgCode;
+  document.getElementById('ggTitleSelect').value = title;
+  onGgComboChange();
+}
+
+function deleteGroupGrant(orgCode, title) {
+  const orgLabel = orgCode || '（不限組織）';
+  const ttlLabel = title || '（不限職稱）';
+  if (!confirm(`確定刪除群組授權「${orgLabel}／${ttlLabel}」的全部標籤？該群組成員將失去對應可見性。`)) return;
+  showLoading(true);
+  google.script.run
+    .withSuccessHandler(res => {
+      showLoading(false);
+      if (!res || !res.success) { showToast('刪除失敗：' + ((res && res.error) || '未知錯誤')); return; }
+      groupGrantsCache = null;
+      loadGroupGrants(() => onGgComboChange());
+      showToast('已刪除群組授權');
+    })
+    .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
+    .apiSetGroupGrants(orgCode, title, []);
+}
+
+// ============================================================
+// 有效權限預覽（V4，僅管理員）
+// ============================================================
+function onPreviewUserChange() {
+  const email = document.getElementById('previewUserSelect').value;
+  const host = document.getElementById('previewResult');
+  if (!email) {
+    host.innerHTML = '<div class="grant-hint">請先選擇一位人員。</div>';
+    return;
+  }
+  host.innerHTML = '<div class="grant-hint">查詢中…</div>';
+  google.script.run
+    .withSuccessHandler(list => {
+      if (!list || !list.length) {
+        host.innerHTML = '<div class="grant-hint">此人目前沒有任何授權標籤（僅能看到自己負責的文件）。</div>';
+        return;
+      }
+      host.innerHTML = list.map(item =>
+        `<div style="padding:4px 0">
+          <span class="tag-chip">${escapeHtml((tagById[item.tag_id] || {}).name || item.tag_id)}</span>
+          <span class="field-hint">${escapeHtml(item.source)}</span>
+        </div>`).join('');
+    })
+    .withFailureHandler(err => {
+      host.innerHTML = '<div class="grant-hint">查詢失敗：' + escapeHtml(err.message) + '</div>';
+    })
+    .apiPreviewUserTags(email);
 }
 </script>
 </body>
