@@ -51,6 +51,8 @@ There is no local build or test command; syntax can be checked with `node --chec
 
 **Sheet "使用者授權" (User Grants)** — columns in `GRANT_COL` (V3): `email` (lowercased) | `tag_id` (one grant per row). Grants are **not** HR-cached — they take effect immediately.
 
+**Sheet "群組授權" (Group Grants)** — columns in `GROUPGRANT_COL` (V4): `org_code` | `title` | `tag_id` (one grant per row; at least one of org_code/title non-empty). Group membership is resolved live from the HR master's 組織架構樹 + 人員職務配置 sheets (cached 10 min) — this system stores only the (group → tag) mapping. **org_code matches direct members only (no org-subtree expansion)** — deliberately opposite to the tag tree's parent-includes-child inheritance.
+
 ### Permission model (auth.js)
 
 - Whitelist source: HR master spreadsheet (Script Properties `HR_SPREADSHEET_ID`), sheet 人員主檔 (A email / B name / C status), filtered by **exclusion** (`EXCLUDED_HR_STATUS = ['離職']`) because Chinese status values are unreliable for exact matching. Cached 10 min.
@@ -60,6 +62,7 @@ There is no local build or test command; syntax can be checked with `node --chec
 ### Tag-permission / visibility model (V3, auth.js)
 
 - **純標籤授權 (tag-only authorization)**: documents carry tags; admins grant tags to users; a user sees documents bearing a granted tag. No per-document grants.
+- **群組授權 (V4, group grants)**: `_getEffectiveGrantedTagIds(ctx)` = personal grants ∪ group grants (via `_groupGrantHits`: each HR assignment row × each group-grant row; org_code empty-or-exact-match AND title empty-or-exact-match). `_getVisibleDocIds` consumes this union; everything downstream (tag-subtree expansion, rules 1–4) is unchanged. Title matching is exact (trimmed); admin UI only offers existing titles from a dropdown.
 - **父含子繼承 (parent-includes-child inheritance)**: granting a parent tag makes the entire subtree of documents visible. `_expandTagWithDescendants(tagIds, allTags)` BFS-expands a grant set over `parent_id`.
 - **deny-by-default for untagged docs**: a document with no tags is visible only to admins and its owner. Before go-live, admins must tag existing documents or ordinary users see nothing.
 - `_getVisibleDocIds(ctx)` returns a `Set` and is the **single visibility authority**: (1) admin → all; (2) own `owner_email` docs → visible; (3) any doc tag ∈ the user's expanded grant set → visible; (4) untagged → rules 1 & 2 only. `_assertCanViewDoc(docId)` guards single-doc entry points (history, ancestor/descendant queries).
@@ -90,6 +93,7 @@ This is the core algorithmic complexity of the project — read these functions 
 - `apiSetDocTags(docId, tagIds)` (`_assertCanEditDoc`, overwrites the doc's tag rows) — V3
 - `apiCreateTag(name, parentId)` / `apiRenameTag(tagId, name)` / `apiMoveTag(tagId, newParentId)` (cycle-checked) / `apiDeleteTag(tagId)` (cascades doc-tag + grant rows) — admin only, V3
 - `apiSetUserGrants(email, tagIds)` / `apiGetAllGrants()` — admin only, V3
+- `apiGetGroupGrants()` / `apiSetGroupGrants(orgCode, title, tagIds)` (full-set overwrite per combo, `[]` deletes) / `apiGetOrgOptions()` / `apiPreviewUserTags(email)` — admin only, V4
 
 Frontend conventions: dashboard stats are computed **client-side** from the already-loaded docs (no extra API); saves are optimistic (local state updated from inputs, no full reload); CSV export is built client-side with a `﻿` BOM.
 
@@ -106,4 +110,4 @@ Frontend conventions: dashboard stats are computed **client-side** from the alre
 - Search/filter inputs use debounce **and** composition-event guards (注音 IME); re-rendering must not rebuild the input node.
 - Modals never close on backdrop click; dirty forms confirm before closing.
 - Secrets/IDs live in Script Properties (`PROP_KEYS`), never in committed code.
-- `_getVisibleDocIds` (auth.js) is the **single visibility authority** — every read API that returns docs/nodes/history must filter through it (or `_assertCanViewDoc` at a single-doc entry point); no API may bypass it and return docs directly.
+- `_getVisibleDocIds` (auth.js) is the **single visibility authority** — every read API that returns docs/nodes/history must filter through it (or `_assertCanViewDoc` at a single-doc entry point); no API may bypass it and return docs directly. Group-grant resolution goes through `_getEffectiveGrantedTagIds` — never read 群組授權 rows directly in an API.
