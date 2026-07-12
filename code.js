@@ -53,18 +53,22 @@ function _readDocs() {
   return rows.slice(1)
     .filter(r => r[DOC_COL.DOC_ID])
     .map(r => ({
-      doc_id:       r[DOC_COL.DOC_ID],
-      title:        r[DOC_COL.TITLE],
-      category:     r[DOC_COL.CATEGORY],
-      status:       r[DOC_COL.STATUS],
-      owner:        r[DOC_COL.OWNER],
-      updated_at:   r[DOC_COL.UPDATED_AT],
-      version:      r[DOC_COL.VERSION],
-      drive_loc:    r[DOC_COL.GOOGLE_DRIVE_LOC],
-      owner_email:  r[DOC_COL.OWNER_EMAIL] || '',
-      published_at: r[DOC_COL.PUBLISHED_AT] || '',
-      next_review:  r[DOC_COL.NEXT_REVIEW] || '',
-      review_cycle: r[DOC_COL.REVIEW_CYCLE] || '',
+      doc_id:             r[DOC_COL.DOC_ID],
+      title:              r[DOC_COL.TITLE],
+      category:           r[DOC_COL.CATEGORY],
+      status:             r[DOC_COL.STATUS],
+      owner:              r[DOC_COL.OWNER],
+      updated_at:         r[DOC_COL.UPDATED_AT],
+      version:            r[DOC_COL.VERSION],
+      drive_loc:          r[DOC_COL.GOOGLE_DRIVE_LOC],
+      owner_email:        r[DOC_COL.OWNER_EMAIL] || '',
+      published_at:       r[DOC_COL.PUBLISHED_AT] || '',
+      next_review:        r[DOC_COL.NEXT_REVIEW] || '',
+      review_cycle:       r[DOC_COL.REVIEW_CYCLE] || '',
+      file_id:            r[DOC_COL.FILE_ID] || '',
+      pending_file_id:    r[DOC_COL.PENDING_FILE_ID] || '',
+      pending_version:    r[DOC_COL.PENDING_VERSION] || '',
+      pending_file_name:  r[DOC_COL.PENDING_FILE_NAME] || '',
     }));
 }
 
@@ -109,7 +113,53 @@ function _docToRow(doc) {
   row[DOC_COL.PUBLISHED_AT]     = doc.published_at || '';
   row[DOC_COL.NEXT_REVIEW]      = doc.next_review || '';
   row[DOC_COL.REVIEW_CYCLE]     = doc.review_cycle || '';
+  row[DOC_COL.FILE_ID]          = doc.file_id || '';
+  row[DOC_COL.PENDING_FILE_ID]  = doc.pending_file_id || '';
+  row[DOC_COL.PENDING_VERSION]  = doc.pending_version || '';
+  row[DOC_COL.PENDING_FILE_NAME] = doc.pending_file_name || '';
   return row;
+}
+
+// 讀取「檔案版本」（過濾空列，新→舊排序由呼叫端決定）
+function _readFileVersions() {
+  const sheet = _getSheet(SHEET_NAMES.FILE_VERSIONS);
+  const rows = sheet.getDataRange().getDisplayValues();
+  return rows.slice(1)
+    .filter(r => r[FILEVER_COL.DOC_ID])
+    .map(r => ({
+      doc_id:      r[FILEVER_COL.DOC_ID],
+      version:     r[FILEVER_COL.VERSION],
+      file_id:     r[FILEVER_COL.FILE_ID],
+      file_name:   r[FILEVER_COL.FILE_NAME],
+      uploaded_by: r[FILEVER_COL.UPLOADED_BY],
+      uploaded_at: r[FILEVER_COL.UPLOADED_AT],
+    }));
+}
+
+// 去除路徑分隔字元，避免檔名污染 Drive 命名或造成混淆
+function _sanitizeFileName(name) {
+  return String(name || '').replace(/[\/\\]/g, '_').trim().slice(0, 200) || 'untitled';
+}
+
+// 版號遞增：X.Y 格式解析；minor → X.(Y+1)，major → (X+1).0。
+// 無法解析（自由文字舊資料）視為 0.0 起算。
+function _bumpVersion(current, bumpType) {
+  if (!VERSION_BUMP_TYPES.includes(bumpType)) {
+    throw new Error(`不支援的改版類型：${bumpType}（允許：${VERSION_BUMP_TYPES.join('、')}）`);
+  }
+  const m = String(current || '').match(/^(\d+)\.(\d+)$/);
+  const major = m ? parseInt(m[1], 10) : 0;
+  const minor = m ? parseInt(m[2], 10) : 0;
+  return bumpType === 'major' ? `${major + 1}.0` : `${major}.${minor + 1}`;
+}
+
+// 取得（或建立）中央資料夾下該文件的子資料夾
+function _getOrCreateDocFolder(docId) {
+  const rootId = _getProp(PROP_KEYS.DOC_FILES_FOLDER_ID);
+  if (!rootId) throw new Error('尚未設定文件檔案庫，請管理員執行 migrateV7()（或 deployAllSheets()）');
+  const root = DriveApp.getFolderById(rootId);
+  const existing = root.getFoldersByName(docId);
+  return existing.hasNext() ? existing.next() : root.createFolder(docId);
 }
 
 // ============================================================
@@ -199,6 +249,65 @@ function apiCreateDoc(doc) {
     _logAudit('建立', newId, newDoc.version || '0.1', `建立文件「${newDoc.title || ''}」`);
     SpreadsheetApp.flush();
     return { success: true, doc_id: newId };
+  } catch (e) {
+    return { success: false, error: String(e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 上傳新版檔案（V6）：寫入 pending 欄並將文件轉入「審核中」，
+// 待管理員核准發布時（apiUpdateDoc promote 邏輯）才正式生效。
+// bumpType：'minor' 或 'major'，決定 pending_version 怎麼算。
+function apiUploadDocFile(docId, fileName, base64, mimeType, bumpType) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const ctx = _assertCanEditDoc(docId);
+    const oldDoc = _readDocs().find(d => d.doc_id === docId);
+    if (!oldDoc) return { success: false, error: '找不到文件：' + docId };
+    if (oldDoc.status === '已廢止') {
+      return { success: false, error: '已廢止文件不可上傳新版檔案' };
+    }
+    if (!base64) return { success: false, error: '未提供檔案內容' };
+
+    const safeName = _sanitizeFileName(fileName);
+    const pendingVersion = _bumpVersion(oldDoc.version, bumpType);
+
+    const bytes = Utilities.base64Decode(base64);
+    const blob = Utilities.newBlob(bytes, mimeType || 'application/octet-stream',
+      `${docId}_v${pendingVersion}_${safeName}`);
+    const folder = _getOrCreateDocFolder(docId);
+    const file = folder.createFile(blob);
+
+    // 若已有待核檔案（重傳），舊的丟垃圾桶避免資料夾堆積
+    if (oldDoc.pending_file_id) {
+      try { DriveApp.getFileById(oldDoc.pending_file_id).setTrashed(true); } catch (e) { /* 已不存在則略過 */ }
+    }
+
+    const sheet = _getSheet(SHEET_NAMES.DOCS);
+    const rows = sheet.getDataRange().getDisplayValues();
+    const idx = rows.findIndex(r => r[DOC_COL.DOC_ID] === docId);
+    if (idx < 1) return { success: false, error: '找不到文件：' + docId };
+
+    sheet.getRange(idx + 1, DOC_COL.PENDING_FILE_ID + 1, 1, 3)
+      .setValues([[file.getId(), pendingVersion, safeName]]);
+
+    let newStatus = oldDoc.status;
+    if (oldDoc.status !== '審核中') {
+      const allowed = STATUS_TRANSITIONS[oldDoc.status] || [];
+      if (allowed.includes('審核中')) {
+        sheet.getRange(idx + 1, DOC_COL.STATUS + 1).setValue('審核中');
+        newStatus = '審核中';
+      }
+    }
+
+    const bumpLabel = bumpType === 'major' ? '大改版' : '小改版';
+    _logAudit('上傳檔案', docId, pendingVersion,
+      `上傳待核檔案「${safeName}」（${bumpLabel}，待核准後生效為 v${pendingVersion}）`);
+
+    SpreadsheetApp.flush();
+    return { success: true, pending_version: pendingVersion, pending_file_name: safeName, status: newStatus };
   } catch (e) {
     return { success: false, error: String(e.message || e) };
   } finally {
