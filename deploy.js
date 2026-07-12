@@ -414,6 +414,63 @@ function migrateV7() {
   Logger.log(`✅ migrateV7 完成（檔案版本管理；中央資料夾 ID：${folderId}）`);
 }
 
+// ── V6 選用工具：搬移既有手動貼的 Drive 連結進中央資料夾 ─────
+// 管理員在 GAS 編輯器手動執行一次。掃描有 google_drive_location 但無
+// file_id 的文件：複製檔案進中央資料夾（不動原檔），登記 file_id 與
+// 檔案版本列。無法存取的連結（權限不足／格式無法辨識）記錄在 log，
+// 不中斷其餘文件的處理。
+function migrateV7ImportLegacyFiles() {
+  const ss = SpreadsheetApp.openById(ENV.SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_NAMES.DOCS);
+  if (!sheet) throw new Error(`找不到工作表：${SHEET_NAMES.DOCS}`);
+
+  const folderId = _ensureDocFilesFolder();
+  const rootFolder = DriveApp.getFolderById(folderId);
+  const rows = sheet.getDataRange().getDisplayValues();
+  const fileVerSheet = _getSheet(SHEET_NAMES.FILE_VERSIONS);
+
+  const skipped = [];
+  let migrated = 0;
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const docId = row[DOC_COL.DOC_ID];
+    if (!docId) continue;
+    const driveLoc = row[DOC_COL.GOOGLE_DRIVE_LOC];
+    const existingFileId = row[DOC_COL.FILE_ID];
+    if (!driveLoc || existingFileId) continue; // 無連結或已搬移過，跳過
+
+    const m = String(driveLoc).match(/[-\w]{25,}/);
+    if (!m) {
+      skipped.push(`${docId}：無法從連結解析出檔案 ID（${driveLoc}）`);
+      continue;
+    }
+    const sourceId = m[0];
+
+    try {
+      const sourceFile = DriveApp.getFileById(sourceId);
+      let docFolder;
+      const existing = rootFolder.getFoldersByName(docId);
+      docFolder = existing.hasNext() ? existing.next() : rootFolder.createFolder(docId);
+      const copy = sourceFile.makeCopy(sourceFile.getName(), docFolder);
+      const version = row[DOC_COL.VERSION] || '0.1';
+
+      sheet.getRange(i + 1, DOC_COL.FILE_ID + 1).setValue(copy.getId());
+      fileVerSheet.appendRow([docId, version, copy.getId(), sourceFile.getName(), 'migrateV7ImportLegacyFiles', Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy/MM/dd HH:mm:ss')]);
+      migrated++;
+      Logger.log(`✅ ${docId}：已搬移「${sourceFile.getName()}」`);
+    } catch (e) {
+      skipped.push(`${docId}：搬移失敗（${e.message || e}）`);
+    }
+  }
+
+  SpreadsheetApp.flush();
+  Logger.log(`✅ migrateV7ImportLegacyFiles 完成：搬移 ${migrated} 筆，跳過 ${skipped.length} 筆`);
+  if (skipped.length) {
+    Logger.log('未搬移清單（需人工處理）：\n' + skipped.join('\n'));
+  }
+}
+
 // ── 寫入測試資料（選用）──────────────────────────────────────
 function seedSampleData() {
   const ss = SpreadsheetApp.openById(ENV.SPREADSHEET_ID);
