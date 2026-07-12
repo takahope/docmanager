@@ -14,8 +14,9 @@ const ENV = {
 // HR_SPREADSHEET_ID：HR 主資料試算表 ID（白名單、負責人名單來源）
 // ADMIN_EMAILS：管理員信箱，逗號分隔
 const PROP_KEYS = {
-  HR_SPREADSHEET_ID: 'HR_SPREADSHEET_ID',
-  ADMIN_EMAILS:      'ADMIN_EMAILS',
+  HR_SPREADSHEET_ID:   'HR_SPREADSHEET_ID',
+  ADMIN_EMAILS:        'ADMIN_EMAILS',
+  DOC_FILES_FOLDER_ID: 'DOC_FILES_FOLDER_ID', // V6：文件檔案中央資料夾 ID（migrateV7 可自動建立並寫回）
 };
 
 // ── HR 主表「人員主檔」結構（依 ECOSYSTEM.md 契約：A 信箱、B 姓名、C 狀態）──
@@ -66,6 +67,7 @@ const SHEET_NAMES = {
   DOC_TAGS: '文件標籤',   // V3：文件↔標籤多對多
   GRANTS:   '使用者授權', // V3：使用者↔標籤授權
   GROUP_GRANTS: '群組授權', // V4：群組（組織/職稱）↔ 標籤授權
+  FILE_VERSIONS: '檔案版本', // V6：每個正式生效版本一列（doc_id, version, file_id, ...）
 };
 
 // ── 文件清單欄位索引（0-based，對應 getValues() 陣列）────────
@@ -77,13 +79,17 @@ const DOC_COL = {
   OWNER:               4,   // E: owner
   UPDATED_AT:          5,   // F: updated_at
   VERSION:             6,   // G: version
-  GOOGLE_DRIVE_LOC:    7,   // H: google_drive_location
+  GOOGLE_DRIVE_LOC:    7,   // H: google_drive_location（V6：legacy 手動連結，僅顯示，不再接受輸入）
   OWNER_EMAIL:         8,   // I: owner_email（權限比對用）
   PUBLISHED_AT:        9,   // J: published_at（轉「已發布」時自動填）
   NEXT_REVIEW:         10,  // K: next_review_date（發布日 + 審查週期）
   REVIEW_CYCLE:        11,  // L: review_cycle_months（審查週期，月）
+  FILE_ID:             12,  // M: file_id（V6：現行生效版的 Drive 檔案 ID）
+  PENDING_FILE_ID:     13,  // N: pending_file_id（V6：待核版檔案 ID，核准發布時 promote）
+  PENDING_VERSION:     14,  // O: pending_version（V6：待核版版號）
+  PENDING_FILE_NAME:   15,  // P: pending_file_name（V6：待核版原始檔名）
 };
-const DOC_COL_COUNT = 12;   // 文件清單總欄數（appendRow / setValues 用）
+const DOC_COL_COUNT = 16;   // 文件清單總欄數（appendRow / setValues 用）
 
 // ── 異動紀錄欄位索引（0-based）───────────────────────────────
 const AUDIT_COL = {
@@ -145,6 +151,18 @@ const GROUPGRANT_COL = {
 };
 const GROUPGRANT_COL_COUNT = 4;
 
+// ── 檔案版本欄位索引（0-based）（V6）─────────────────────────
+// 每個「正式生效」版本一列；pending（待核）版不入表，核准發布時才 append。
+const FILEVER_COL = {
+  DOC_ID:      0,  // A: doc_id
+  VERSION:     1,  // B: version（生效版號）
+  FILE_ID:     2,  // C: file_id（Drive 檔案 ID）
+  FILE_NAME:   3,  // D: file_name（原始檔名）
+  UPLOADED_BY: 4,  // E: uploaded_by（上傳者信箱）
+  UPLOADED_AT: 5,  // F: uploaded_at（核准發布時間）
+};
+const FILEVER_COL_COUNT = 6;
+
 // ── 文件狀態選項 ──────────────────────────────────────────────
 const DOC_STATUS = ['草稿', '審核中', '已發布', '已廢止'];
 
@@ -164,6 +182,9 @@ const DEFAULT_REVIEW_CYCLE = 12;
 
 // ── 關聯類型選項 ──────────────────────────────────────────────
 const RELATION_TYPES = ['references', 'supersedes', 'derived_from', 'related'];
+
+// ── 版號改版類型（V6，上傳檔案時二選一，白名單驗證）────────────
+const VERSION_BUMP_TYPES = ['minor', 'major']; // minor: X.Y→X.(Y+1)；major: X.Y→(X+1).0
 
 // ── 文件類別選項 ──────────────────────────────────────────────
 const DOC_CATEGORIES = ['ISMS', 'PIMS', '表單', 'SOP', '政策', '指引'];
