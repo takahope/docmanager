@@ -1370,14 +1370,14 @@ function selectDoc(docId) {
   renderTable(); // 更新 active 樣式
   renderDetailSkeleton(docId);
 
-  // 三個查詢平行發出，全部到齊才渲染
+  // 四個查詢平行發出，全部到齊才渲染
   const results = {};
-  let pending = 3;
+  let pending = 4;
   let failed = false;
   const arrive = (key, val) => {
     results[key] = val;
     if (--pending === 0 && !failed) {
-      renderDetail(docId, results.desc, results.anc, results.hist);
+      renderDetail(docId, results.desc, results.anc, results.hist, results.fileVer);
     }
   };
   const onFail = label => err => {
@@ -1394,6 +1394,8 @@ function selectDoc(docId) {
     .withFailureHandler(onFail('反查失敗')).apiGetAncestors(docId);
   google.script.run.withSuccessHandler(v => arrive('hist', v))
     .withFailureHandler(onFail('歷史載入失敗')).apiGetDocHistory(docId);
+  google.script.run.withSuccessHandler(v => arrive('fileVer', v))
+    .withFailureHandler(onFail('檔案版本載入失敗')).apiGetDocFileVersions(docId);
 }
 
 function renderDetailSkeleton(docId) {
@@ -1405,17 +1407,19 @@ function renderDetailSkeleton(docId) {
     <div style="color:#6b7280;padding:16px 0;font-size:13px">關聯資料載入中…</div>`;
 }
 
-function renderDetail(docId, descendants, ancestors, history) {
+function renderDetail(docId, descendants, ancestors, history, fileVersions) {
   const doc = allDocs.find(d => d.doc_id === docId);
   if (!doc) return;
   const editable = canEditDoc(doc);
 
   const driveHref = safeUrl(doc.drive_loc);
   const driveLink = driveHref
-    ? `<a href="${escapeHtml(driveHref)}" target="_blank" rel="noopener">開啟連結 ↗</a>`
+    ? `<a href="${escapeHtml(driveHref)}" target="_blank" rel="noopener">開啟連結 ↗（舊版手動連結）</a>`
     : (doc.drive_loc
-        ? `<span style="color:#9ca3af">${escapeHtml(doc.drive_loc)}</span>`
-        : '<span style="color:#9ca3af">未設定</span>');
+        ? `<span style="color:#9ca3af">${escapeHtml(doc.drive_loc)}（待搬移）</span>`
+        : '');
+
+  const fileSectionHtml = renderFileSection(doc, fileVersions || [], editable, driveLink);
 
   // 審查資訊列（已發布文件才有意義）
   let reviewRow = '';
@@ -1487,6 +1491,8 @@ function renderDetail(docId, descendants, ancestors, history) {
       <dt>Drive</dt><dd>${driveLink}</dd>
     </dl>
 
+    ${fileSectionHtml}
+
     <div class="section-title"><span>🏷 標籤</span></div>
     <div class="ms-chips" style="margin-bottom:4px">${docTagChipsHtml(docId)}</div>
 
@@ -1503,6 +1509,118 @@ function renderDetail(docId, descendants, ancestors, history) {
     <div style="max-height:220px;overflow-y:auto">${histHtml}</div>
 
     ${(editable || canDelete()) ? actionsHtml : ''}`;
+}
+
+// V6：文件詳情頁的檔案區塊——現行生效版、待核版（僅可編輯者見）、上傳表單、版本歷史
+function renderFileSection(doc, fileVersions, editable, legacyDriveLink) {
+  const currentHtml = doc.file_id
+    ? `<div class="rel-item">
+         <div class="rel-info">
+           <div class="rel-title">現行版 v${escapeHtml(doc.version)}</div>
+         </div>
+         <button onclick="downloadDocFile('${escapeHtml(doc.doc_id)}','${escapeHtml(doc.file_id)}')">下載</button>
+       </div>`
+    : `<div style="color:#9ca3af;font-size:13px;padding:6px 0">尚未上傳檔案${legacyDriveLink ? '（' + legacyDriveLink + '）' : ''}</div>`;
+
+  const pendingHtml = (editable && doc.pending_file_id)
+    ? `<div class="rel-item" style="background:#fffbeb">
+         <div class="rel-info">
+           <div class="rel-title">待核版 v${escapeHtml(doc.pending_version)}｜${escapeHtml(doc.pending_file_name)}</div>
+           <div class="rel-sub">待管理員核准發布後生效</div>
+         </div>
+         <button onclick="downloadDocFile('${escapeHtml(doc.doc_id)}','${escapeHtml(doc.pending_file_id)}')">下載</button>
+       </div>`
+    : '';
+
+  const historyHtml = fileVersions.length === 0
+    ? '<div style="color:#9ca3af;font-size:13px;padding:6px 0">尚無版本歷史</div>'
+    : fileVersions.map(v => `
+      <div class="rel-item">
+        <div class="rel-info">
+          <div class="rel-title">v${escapeHtml(v.version)}｜${escapeHtml(v.file_name)}</div>
+          <div class="rel-sub">${escapeHtml(v.uploaded_by)}｜${escapeHtml(v.uploaded_at)}</div>
+        </div>
+        <button onclick="downloadDocFile('${escapeHtml(doc.doc_id)}','${escapeHtml(v.file_id)}')">下載</button>
+      </div>`).join('');
+
+  const uploadHtml = editable ? `
+    <div style="margin-top:8px;padding:12px;border:1px dashed #cbd5e1;border-radius:6px">
+      <input type="file" id="fileUploadInput_${escapeHtml(doc.doc_id)}" style="display:block;margin-bottom:8px">
+      <label style="margin-right:12px;font-size:13px"><input type="radio" name="bumpType_${escapeHtml(doc.doc_id)}" value="minor" checked> 小改版</label>
+      <label style="font-size:13px"><input type="radio" name="bumpType_${escapeHtml(doc.doc_id)}" value="major"> 大改版</label>
+      <button style="display:block;margin-top:8px" onclick="uploadDocFile('${escapeHtml(doc.doc_id)}')">上傳新版</button>
+    </div>` : '';
+
+  return `
+    <div class="section-title"><span>📄 檔案</span></div>
+    ${currentHtml}
+    ${pendingHtml}
+    ${uploadHtml}
+    <div class="section-title" style="margin-top:8px"><span>🕘 檔案版本歷史</span></div>
+    <div style="max-height:160px;overflow-y:auto">${historyHtml}</div>`;
+}
+
+// 上傳新版檔案：前端 20MB 上限檢查 → 讀成 base64 → 呼叫 apiUploadDocFile
+function uploadDocFile(docId) {
+  const input = document.getElementById('fileUploadInput_' + docId);
+  const file = input && input.files[0];
+  if (!file) { showToast('請先選擇檔案'); return; }
+  const MAX_BYTES = 20 * 1024 * 1024;
+  if (file.size > MAX_BYTES) { showToast('檔案過大，上限 20MB'); return; }
+
+  const bumpInput = document.querySelector(`input[name="bumpType_${docId}"]:checked`);
+  const bumpType = bumpInput ? bumpInput.value : 'minor';
+
+  showLoading(true);
+  const reader = new FileReader();
+  reader.onload = () => {
+    const base64 = String(reader.result).split(',')[1] || '';
+    google.script.run
+      .withSuccessHandler(res => {
+        showLoading(false);
+        if (!res.success) { showToast('上傳失敗：' + res.error); return; }
+        showToast(`已上傳待核版 v${res.pending_version}，待管理員核准發布`);
+        const idx = allDocs.findIndex(d => d.doc_id === docId);
+        if (idx >= 0) {
+          allDocs[idx] = Object.assign({}, allDocs[idx], {
+            pending_file_id: 'pending', // 精確值由 selectDoc 重新載入取得，這裡先標記非空以觸發 UI
+            pending_version: res.pending_version,
+            pending_file_name: res.pending_file_name,
+            status: res.status || allDocs[idx].status,
+          });
+        }
+        renderTable();
+        selectDoc(docId);
+      })
+      .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
+      .apiUploadDocFile(docId, file.name, base64, file.type || 'application/octet-stream', bumpType);
+  };
+  reader.onerror = () => { showLoading(false); showToast('讀取檔案失敗'); };
+  reader.readAsDataURL(file);
+}
+
+// 代理下載：後端回傳 base64，前端組 Blob 觸發下載
+function downloadDocFile(docId, fileId) {
+  showLoading(true);
+  google.script.run
+    .withSuccessHandler(res => {
+      showLoading(false);
+      if (!res.success) { showToast('下載失敗：' + (res.error || '未知錯誤')); return; }
+      const bytes = atob(res.base64);
+      const arr = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+      const blob = new Blob([arr], { type: res.mimeType || 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = res.fileName || 'download';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    })
+    .withFailureHandler(err => { showLoading(false); showToast('下載失敗：' + err.message); })
+    .apiDownloadDocFile(docId, fileId);
 }
 
 // ============================================================
