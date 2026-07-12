@@ -8,12 +8,14 @@ A Google Apps Script (GAS) full-stack document management system using Google Sh
 
 V2 (2026-07) added: HR-whitelist access control, role-based editing, status-flow enforcement, publish/review-date tracking, an audit trail sheet, a dashboard, an SVG relation graph, and CSV export.
 
+V5 (2026-07) added: two-level permission model (read/edit) on tags and group grants; `_getEditableDocIds` authority; edit-gated write APIs; edit-only document detail editing and tag-management UI.
+
 ## File Structure & Responsibilities
 
 | File | Responsibility |
 |---|---|
 | `env.js` | Centralized config: sheet names, column index constants (`DOC_COL`/`CLS_COL`/`AUDIT_COL`/`HR_COL`), `STATUS_TRANSITIONS` map, option lists, Script Properties key names (`PROP_KEYS`) |
-| `deploy.js` | `deployAllSheets()` creates the three sheets; `migrateV2()` idempotently adds J–M columns + audit sheet to a V1 spreadsheet; `seedSampleData()` |
+| `deploy.js` | `deployAllSheets()` creates the three sheets; `migrateV2()` idempotently adds J–M columns + audit sheet to a V1 spreadsheet; `migrateV6()` adds read/edit permission columns to 使用者授權 and 群組授權 sheets (V4→V5 upgrade); `seedSampleData()` |
 | `auth.js` | Permission layer: HR whitelist (CacheService 10 min), `getUserContext()`, `_assertWhitelisted/_assertCanEditDoc/_assertAdmin`, `authorizeOnce()`, `debugGetSystemData()`, `clearHrCache()` |
 | `audit.js` | `_logAudit()` (called inside locks; swallows its own errors), `_diffSummary()`, `apiGetDocHistory(docId)` |
 | `code.js` | `doGet` whitelist gate, document CRUD, Closure Table maintenance, all other `apiXxx` functions |
@@ -29,7 +31,7 @@ There is no local build or test command; syntax can be checked with `node --chec
    - `index.html` (create as type "HTML")
 3. Script Properties (Project Settings): set `HR_SPREADSHEET_ID` (HR master spreadsheet) and `ADMIN_EMAILS` (comma-separated) — **never hardcode these in env.js (PLAYBOOK P6)**
 4. Run `authorizeOnce()` once in the editor → authorize scopes (Sheets read on HR file)
-5. Run `deployAllSheets()` (new install) or `migrateV2()` (upgrading a V1 sheet — idempotent, safe to re-run)
+5. Run `deployAllSheets()` (new install) or `migrateV2()` (V1→V2) or `migrateV6()` (V4→V5, adding permission columns — idempotent, safe to re-run)
 6. (Optional) `seedSampleData()`; run `debugGetSystemData()` to verify HR headers + whitelist count
 7. Deploy → New deployment → Web app (execute as: me; access: domain). `clasp push` only updates /dev; /exec needs a new deployment version.
 
@@ -49,9 +51,9 @@ There is no local build or test command; syntax can be checked with `node --chec
 
 **Sheet "文件標籤" (Doc-Tags)** — columns in `DOCTAG_COL` (V3): `doc_id` | `tag_id` (many-to-many, one pair per row). A document with multiple tags appears in multiple folders without copying.
 
-**Sheet "使用者授權" (User Grants)** — columns in `GRANT_COL` (V3): `email` (lowercased) | `tag_id` (one grant per row). Grants are **not** HR-cached — they take effect immediately.
+**Sheet "使用者授權" (User Grants)** — columns in `GRANT_COL` (V3, V5 adds column 3): `email` (lowercased) | `tag_id` | `permission` (one grant per row). `permission` field: empty = `read` (default), `'edit'` = edit access (fail-closed — only these two values). Grants are **not** HR-cached — they take effect immediately.
 
-**Sheet "群組授權" (Group Grants)** — columns in `GROUPGRANT_COL` (V4): `org_code` | `title` | `tag_id` (one grant per row; at least one of org_code/title non-empty). Group membership is resolved live from the HR master's 組織架構樹 + 人員職務配置 sheets (cached 10 min) — this system stores only the (group → tag) mapping. **org_code matches direct members only (no org-subtree expansion)** — deliberately opposite to the tag tree's parent-includes-child inheritance.
+**Sheet "群組授權" (Group Grants)** — columns in `GROUPGRANT_COL` (V4, V5 adds column 4): `org_code` | `title` | `tag_id` | `permission` (one grant per row; at least one of org_code/title non-empty). `permission` field: empty = `read` (default), `'edit'` = edit access (fail-closed). Group membership is resolved live from the HR master's 組織架構樹 + 人員職務配置 sheets (cached 10 min) — this system stores only the (group → tag) mapping. **org_code matches direct members only (no org-subtree expansion)** — deliberately opposite to the tag tree's parent-includes-child inheritance.
 
 ### Permission model (auth.js)
 
@@ -67,6 +69,7 @@ There is no local build or test command; syntax can be checked with `node --chec
 - **deny-by-default for untagged docs**: a document with no tags is visible only to admins and its owner. Before go-live, admins must tag existing documents or ordinary users see nothing.
 - `_getVisibleDocIds(ctx)` returns a `Set` and is the **single visibility authority**: (1) admin → all; (2) own `owner_email` docs → visible; (3) any doc tag ∈ the user's expanded grant set → visible; (4) untagged → rules 1 & 2 only. `_assertCanViewDoc(docId)` guards single-doc entry points (history, ancestor/descendant queries).
 - Tag-tree maintenance (create/rename/move/delete) is admin-only (`_assertAdmin`); tagging a document uses `_assertCanEditDoc` (admin + owner). Invisible documents are **fully hidden** — absent from the graph, ancestor/descendant queries, and detail pages.
+- **編輯授權（V5, edit permission level）**：授權列帶 `permission`（read/edit，空白＝read，fail-closed）。`_getEffectiveGrantedTagIds(ctx)` 回傳 `{read, edit}` 兩個 Set（read ⊇ edit，edit 蘊含 read）。`_getEditableDocIds(ctx)` 是**唯一的可編輯性事實來源**（與 `_getVisibleDocIds` 同構：admin 全部／owner_email／文件標籤 ∈ edit 子孫展開集／無標籤僅前二者）。edit 授權者可改欄位、走狀態流轉、維護關聯；**貼標籤與更換負責人仍限 `_assertOwnerOrAdmin`（admin + owner）**——改標籤＝改可見範圍，不隨 edit 權下放。supersedes 關聯因會自動廢止後代端文件，需具備後代端編輯權。授權（含等級）仍僅管理員可設定。
 
 ### Status flow (env.js `STATUS_TRANSITIONS` + code.js `apiUpdateDoc`)
 
@@ -84,16 +87,16 @@ This is the core algorithmic complexity of the project — read these functions 
 
 `index.html` calls backend functions via `google.script.run.withSuccessHandler(...).withFailureHandler(...)` (every call must have a failure handler). Exposed API surface:
 
-- `apiGetInitData()` — docs (filtered to the visible set) + option lists + `statusTransitions` + `user` context (with `grantedTagIds`) + `hrPeople` (owner dropdown) + `tags` (all tags — folder tree needs names) + `docTags` (visible docs only)
+- `apiGetInitData()` — docs (filtered to the visible set) + option lists + `statusTransitions` + `user` context (with `grantedTagIds`, V5: `{read, edit}` Sets) + `editableDocIds` (V5: filtered to editable set) + `hrPeople` (owner dropdown) + `tags` (all tags — folder tree needs names) + `docTags` (visible docs only)
 - `apiCreateDoc(doc)` (may carry `tagIds`) / `apiUpdateDoc(doc)` / `apiDeleteDoc(docId)` (admin only; cascades doc-tag rows)
 - `apiGetDescendants(docId, maxDepth)` / `apiGetAncestors(docId)` — `_assertCanViewDoc` at entry, results re-filtered to the visible set
 - `apiAddRelation(...)` (returns `deprecated` doc_id when supersedes auto-deprecates) / `apiRemoveRelation(...)`
 - `apiGetGraphData()` — nodes + direct edges, both filtered to the visible set; rendered as a pure-SVG layered DAG (longest-path layering — safe because closure table guarantees acyclicity)
 - `apiGetDocHistory(docId)` — audit rows for one document (`_assertCanViewDoc` at entry)
-- `apiSetDocTags(docId, tagIds)` (`_assertCanEditDoc`, overwrites the doc's tag rows) — V3
+- `apiSetDocTags(docId, tagIds)` (`_assertOwnerOrAdmin`, overwrites the doc's tag rows; V5: edit grantees may not call this) — V3
 - `apiCreateTag(name, parentId)` / `apiRenameTag(tagId, name)` / `apiMoveTag(tagId, newParentId)` (cycle-checked) / `apiDeleteTag(tagId)` (cascades doc-tag + grant rows) — admin only, V3
-- `apiSetUserGrants(email, tagIds)` / `apiGetAllGrants()` — admin only, V3
-- `apiGetGroupGrants()` / `apiSetGroupGrants(orgCode, title, tagIds)` (full-set overwrite per combo, `[]` deletes) / `apiGetOrgOptions()` / `apiPreviewUserTags(email)` — admin only, V4
+- `apiSetUserGrants(email, grants)` / `apiGetAllGrants()` — admin only, V3 (V5: grants=[{tagId, permission}], full-set overwrite, `[]` deletes)
+- `apiGetGroupGrants()` / `apiSetGroupGrants(orgCode, title, grants)` (full-set overwrite per combo, `[]` deletes; V5: grants=[{tagId, permission}]) / `apiGetOrgOptions()` / `apiPreviewUserTags(email)` (V5: returns {tagId, permission} pairs) — admin only, V4
 
 Frontend conventions: dashboard stats are computed **client-side** from the already-loaded docs (no extra API); saves are optimistic (local state updated from inputs, no full reload); CSV export is built client-side with a `﻿` BOM.
 
@@ -111,3 +114,4 @@ Frontend conventions: dashboard stats are computed **client-side** from the alre
 - Modals never close on backdrop click; dirty forms confirm before closing.
 - Secrets/IDs live in Script Properties (`PROP_KEYS`), never in committed code.
 - `_getVisibleDocIds` (auth.js) is the **single visibility authority** — every read API that returns docs/nodes/history must filter through it (or `_assertCanViewDoc` at a single-doc entry point); no API may bypass it and return docs directly. Group-grant resolution goes through `_getEffectiveGrantedTagIds` — never read 群組授權 rows directly in an API.
+- `_getEditableDocIds` (auth.js, V5) is the **single editability authority** — every write API that modifies a document must check authorization via `_assertCanEditDoc` or `_assertOwnerOrAdmin` or `_assertAdmin`, never bypassing these guards. `permission` values in grants must be normalized through `_normPermission` (whitelist: empty/`'read'`/`'edit'`, default empty) — never accept raw user input for permission fields.
