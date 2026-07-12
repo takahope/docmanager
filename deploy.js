@@ -14,6 +14,8 @@ function deployAllSheets() {
   _deployDocTagSheet(ss);
   _deployGrantSheet(ss);
   _deployGroupGrantSheet(ss);
+  _deployFileVersionSheet(ss);
+  _ensureDocFilesFolder();
 
   SpreadsheetApp.flush();
   Logger.log('✅ 所有工作表初始化完成');
@@ -75,7 +77,8 @@ function _deployDocSheet(ss) {
   const headers = [
     'doc_id', 'title', 'category', 'status',
     'owner', 'updated_at', 'version', 'google_drive_location',
-    'owner_email', 'published_at', 'next_review_date', 'review_cycle_months'
+    'owner_email', 'published_at', 'next_review_date', 'review_cycle_months',
+    'file_id', 'pending_file_id', 'pending_version', 'pending_file_name'
   ];
 
   // 寫入 Header（第一列）
@@ -90,7 +93,7 @@ function _deployDocSheet(ss) {
   sheet.getRange('A:A').setNumberFormat('@');
 
   // 欄寬設定
-  const colWidths = [120, 240, 100, 80, 100, 120, 80, 280, 200, 110, 130, 90];
+  const colWidths = [120, 240, 100, 80, 100, 120, 80, 280, 200, 110, 130, 90, 160, 160, 90, 200];
   colWidths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
 
   // 資料驗證：status 下拉
@@ -136,6 +139,8 @@ function _applyDocSheetFormats(sheet) {
   // owner_email (I)、日期欄 (J, K) 強制文字，避免日期被序列化成 Date 物件
   sheet.getRange('I:I').setNumberFormat('@');
   sheet.getRange('J:K').setNumberFormat('@');
+  // file_id / pending_* (M-P) 強制文字（V6）
+  sheet.getRange('M:P').setNumberFormat('@');
 
   // 資料驗證：review_cycle_months (L) 下拉
   const cycleRule = SpreadsheetApp.newDataValidation()
@@ -303,6 +308,34 @@ function _deployGroupGrantSheet(ss) {
   Logger.log(`✅ ${SHEET_NAMES.GROUP_GRANTS} 初始化完成`);
 }
 
+// ── 建立「檔案版本」工作表（V6）───────────────────────────────
+function _deployFileVersionSheet(ss) {
+  const sheet = _deployV3Sheet(
+    ss, SHEET_NAMES.FILE_VERSIONS,
+    ['doc_id', 'version', 'file_id', 'file_name', 'uploaded_by', 'uploaded_at'],
+    ['A', 'C'], '#5c2d2d');
+  const colWidths = [120, 80, 220, 240, 200, 150];
+  colWidths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
+  Logger.log(`✅ ${SHEET_NAMES.FILE_VERSIONS} 初始化完成`);
+}
+
+// 確保中央檔案資料夾存在；未設定 Script Property 時自動建立並寫回。
+function _ensureDocFilesFolder() {
+  const existing = _getProp(PROP_KEYS.DOC_FILES_FOLDER_ID);
+  if (existing) {
+    try {
+      DriveApp.getFolderById(existing); // 驗證仍可存取
+      return existing;
+    } catch (e) {
+      Logger.log(`⚠️ DOC_FILES_FOLDER_ID（${existing}）已無法存取，將建立新資料夾：${e}`);
+    }
+  }
+  const folder = DriveApp.createFolder('文件管理系統檔案庫');
+  PropertiesService.getScriptProperties().setProperty(PROP_KEYS.DOC_FILES_FOLDER_ID, folder.getId());
+  Logger.log(`✅ 已建立中央檔案資料夾並寫入 Script Properties：${folder.getId()}`);
+  return folder.getId();
+}
+
 // ── V3 → V4 遷移：新增群組授權表 ─────────────────────────────
 // 冪等設計：表頭已存在就跳過，可重複執行。
 function migrateV4() {
@@ -344,6 +377,41 @@ function migrateV6() {
   });
   SpreadsheetApp.flush();
   Logger.log('✅ migrateV6 完成（授權表 permission 欄）');
+}
+
+// ── V5 → V6 遷移：文件清單補 M–P 欄、建檔案版本表、確保中央資料夾 ──
+// 冪等設計：表頭已存在就跳過，不動既有資料列；可重複執行。
+function migrateV7() {
+  const ss = SpreadsheetApp.openById(ENV.SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_NAMES.DOCS);
+  if (!sheet) throw new Error(`找不到工作表：${SHEET_NAMES.DOCS}，請先執行 deployAllSheets()`);
+
+  const newHeaders = [
+    { col: DOC_COL.FILE_ID + 1,           name: 'file_id' },
+    { col: DOC_COL.PENDING_FILE_ID + 1,   name: 'pending_file_id' },
+    { col: DOC_COL.PENDING_VERSION + 1,   name: 'pending_version' },
+    { col: DOC_COL.PENDING_FILE_NAME + 1, name: 'pending_file_name' },
+  ];
+
+  newHeaders.forEach(h => {
+    const cell = sheet.getRange(1, h.col);
+    if (cell.getValue() === h.name) {
+      Logger.log(`欄位已存在，跳過：${h.name}`);
+      return;
+    }
+    cell.setValue(h.name)
+        .setFontWeight('bold')
+        .setBackground('#1a3a5c')
+        .setFontColor('#ffffff');
+    Logger.log(`✅ 補上欄位：${h.name}（第 ${h.col} 欄）`);
+  });
+
+  _applyDocSheetFormats(sheet);
+  _deployFileVersionSheet(ss);
+  const folderId = _ensureDocFilesFolder();
+
+  SpreadsheetApp.flush();
+  Logger.log(`✅ migrateV7 完成（檔案版本管理；中央資料夾 ID：${folderId}）`);
 }
 
 // ── 寫入測試資料（選用）──────────────────────────────────────
