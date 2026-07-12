@@ -407,6 +407,42 @@ function apiUpdateDoc(doc) {
   }
 }
 
+// 代理下載文件檔案（V6）：檔案不設任何 Drive 共用，一律經此 API
+// 依現有可見性／可編輯性權限回傳內容，避免繞過標籤權限直接用連結存取。
+// fileId 必須屬於該文件（現行 file_id、pending_file_id，或其歷史版本），
+// 否則視為越權存取拒絕（IDOR 防護）；pending 檔額外要求編輯權（審核者為 admin，天然通過）。
+function apiDownloadDocFile(docId, fileId) {
+  const ctx = _assertCanViewDoc(docId);
+  const doc = _readDocs().find(d => d.doc_id === docId);
+  if (!doc) throw new Error('找不到文件：' + docId);
+
+  const historyIds = _readFileVersions().filter(v => v.doc_id === docId).map(v => v.file_id);
+  const validIds = new Set([doc.file_id, doc.pending_file_id, ...historyIds].filter(Boolean));
+  if (!validIds.has(fileId)) {
+    throw new Error('無效的檔案：此檔案不屬於指定文件');
+  }
+  if (fileId === doc.pending_file_id) {
+    _assertCanEditDoc(docId); // 待核檔案僅編輯權者（含審核管理員）可下載
+  }
+
+  const file = DriveApp.getFileById(fileId);
+  const blob = file.getBlob();
+  return {
+    success: true,
+    fileName: file.getName(),
+    mimeType: blob.getContentType(),
+    base64: Utilities.base64Encode(blob.getBytes()),
+  };
+}
+
+// 取得文件的檔案版本歷史（V6，新→舊排序）
+function apiGetDocFileVersions(docId) {
+  _assertCanViewDoc(docId);
+  return _readFileVersions()
+    .filter(v => v.doc_id === docId)
+    .reverse();
+}
+
 // 刪除文件（同步刪除閉包表中所有相關記錄）——不可逆，僅限管理員
 function apiDeleteDoc(docId) {
   const lock = LockService.getScriptLock();
