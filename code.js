@@ -354,10 +354,17 @@ function apiUpdateDoc(doc) {
     }
 
     // 發布日／下次審查日：預設沿用舊值；轉「已發布」時重算
+    // V6：version / file_id / pending_* 一律沿用 oldDoc，前端送來的值一律忽略——
+    // 唯一改動這些欄位的路徑是下方「核准發布時 promote」與 apiUploadDocFile。
     const merged = Object.assign({}, doc, {
       published_at: oldDoc.published_at,
       next_review:  oldDoc.next_review,
       status: newStatus,
+      version: oldDoc.version,
+      file_id: oldDoc.file_id,
+      pending_file_id: oldDoc.pending_file_id,
+      pending_version: oldDoc.pending_version,
+      pending_file_name: oldDoc.pending_file_name,
     });
     if (newStatus === '已發布' && oldStatus !== '已發布') {
       const cycle = parseInt(doc.review_cycle, 10) || DEFAULT_REVIEW_CYCLE;
@@ -365,16 +372,34 @@ function apiUpdateDoc(doc) {
       merged.next_review  = _addMonthsFromToday(cycle);
     }
 
+    // V6：核准發布時，若有待核檔案，promote 為正式版並登記檔案版本表
+    let promotedVersion = '';
+    if (newStatus === '已發布' && oldStatus !== '已發布' && oldDoc.pending_file_id) {
+      promotedVersion = oldDoc.pending_version;
+      merged.version = oldDoc.pending_version;
+      merged.file_id = oldDoc.pending_file_id;
+      merged.pending_file_id = '';
+      merged.pending_version = '';
+      merged.pending_file_name = '';
+    }
+
     sheet.getRange(idx + 1, 1, 1, DOC_COL_COUNT).setValues([_docToRow(merged)]);
+
+    if (promotedVersion) {
+      const fileVerSheet = _getSheet(SHEET_NAMES.FILE_VERSIONS);
+      fileVerSheet.appendRow([doc.doc_id, promotedVersion, merged.file_id, oldDoc.pending_file_name, _getCurrentEmail(), _nowWithTime()]);
+    }
 
     const action = (newStatus !== oldStatus) ? '狀態變更' : '更新';
     const summary = (newStatus !== oldStatus)
-      ? `${oldStatus} → ${newStatus}` + (merged.published_at !== oldDoc.published_at ? `（發布日 ${merged.published_at}，下次審查 ${merged.next_review}）` : '')
+      ? `${oldStatus} → ${newStatus}` +
+        (merged.published_at !== oldDoc.published_at ? `（發布日 ${merged.published_at}，下次審查 ${merged.next_review}）` : '') +
+        (promotedVersion ? `｜檔案 v${promotedVersion} 生效` : '')
       : (_diffSummary(oldDoc, doc) || '（無欄位變更）');
-    _logAudit(action, doc.doc_id, doc.version || oldDoc.version, summary);
+    _logAudit(action, doc.doc_id, merged.version, summary);
 
     SpreadsheetApp.flush();
-    return { success: true, published_at: merged.published_at, next_review: merged.next_review };
+    return { success: true, published_at: merged.published_at, next_review: merged.next_review, version: merged.version };
   } catch (e) {
     return { success: false, error: String(e.message || e) };
   } finally {
