@@ -377,6 +377,11 @@
     padding: 1px 7px; border-radius: 999px; font-weight: 600;
   }
   .grant-hint { color: var(--text-muted); font-size: 12px; padding: 8px 2px; }
+  .perm-chip { border:1px solid #d1d5db; background:#fff; border-radius:10px;
+    font-size:11px; padding:1px 8px; margin-left:6px; cursor:pointer; }
+  .perm-chip:disabled { cursor:default; opacity:.65; }
+  .perm-read { color:#374151; }
+  .perm-edit { color:#92400e; border-color:#f59e0b; background:#fffbeb; }
 
   @media (max-width: 900px) {
     .container { flex-direction: column; }
@@ -712,7 +717,7 @@ let modalTagIdsOriginal = [];
 let modalTagEditable = false;
 let isTagFilterComposing = false;
 // 使用者授權面板：目前編輯中使用者的勾選集合
-let grantChecked = {};    // tag_id -> true
+let grantChecked = {};    // tag_id -> 'read'|'edit'
 
 // Modal dirty 防護：開啟時記錄表單快照，關閉前比對
 let modalSnapshots = {};
@@ -2157,13 +2162,70 @@ function deleteTag(tagId) {
     .apiDeleteTag(tagId);
 }
 
+// ============================================================
+// V5 權限等級共用工具（個人授權與群組授權共用）
+// checkedMap: tagId → 'read' | 'edit'（僅存「明確授權」項）
+// ============================================================
+// 祖先繼承而來的權限（取最高；'' = 無繼承）
+function permInherited(checkedMap, tagId) {
+  let best = '';
+  let cur = (tagById[tagId] || {}).parent_id || '';
+  while (cur && tagById[cur]) {
+    if (checkedMap[cur] === 'edit') return 'edit';
+    if (checkedMap[cur] === 'read') best = 'read';
+    cur = tagById[cur].parent_id || '';
+  }
+  return best;
+}
+// 有效權限 = max(明確, 繼承)
+function permEffective(checkedMap, tagId) {
+  const own = checkedMap[tagId] || '';
+  const inh = permInherited(checkedMap, tagId);
+  if (own === 'edit' || inh === 'edit') return 'edit';
+  return (own || inh) ? 'read' : '';
+}
+// 點擊權限 chip：讀取 ⇄ 編輯。繼承 edit 時已是最高、不動作；
+// 繼承 read 之下降回 read ＝ 移除明確加碼項。
+function permCycle(checkedMap, tagId) {
+  const inh = permInherited(checkedMap, tagId);
+  const eff = permEffective(checkedMap, tagId);
+  if (eff === 'edit') {
+    if (inh === 'edit') return;
+    if (inh === 'read') delete checkedMap[tagId];
+    else checkedMap[tagId] = 'read';
+  } else if (eff === 'read') {
+    checkedMap[tagId] = 'edit';
+  }
+}
+// 只送最小授權集合：明確項中，未被祖先繼承完全涵蓋者
+function permExplicitItems(checkedMap) {
+  return Object.keys(checkedMap)
+    .filter(id => tagById[id])
+    .filter(id => {
+      const inh = permInherited(checkedMap, id);
+      return inh === '' || (inh === 'read' && checkedMap[id] === 'edit');
+    })
+    .map(id => ({ tagId: id, permission: checkedMap[id] }));
+}
+// 權限 chip HTML。tagId 為系統產生的 TAG-\d+ 格式（無引號風險），
+// 經 escapeHtml 後內插，維持與既有 onGrantToggle 相同慣例。
+function permChipHtml(checkedMap, tagId, cycleFnName) {
+  const eff = permEffective(checkedMap, tagId);
+  if (!eff) return '';
+  const locked = permInherited(checkedMap, tagId) === 'edit';
+  const label = eff === 'edit' ? '✏️ 編輯' : '👁 讀取';
+  const cls = eff === 'edit' ? 'perm-chip perm-edit' : 'perm-chip perm-read';
+  return `<button type="button" class="${cls}" ${locked ? 'disabled' : ''} ` +
+    `onclick="event.preventDefault();${cycleFnName}('${escapeHtml(tagId)}')">${label}</button>`;
+}
+
 // ── 使用者授權 ─────────────────────────────────────────────
 function loadAllGrants(cb) {
   google.script.run
     .withSuccessHandler(list => {
       allGrantsCache = {};
       (list || []).forEach(g => {
-        allGrantsCache[String(g.email).toLowerCase()] = (g.tagIds || []).slice();
+        allGrantsCache[String(g.email).toLowerCase()] = (g.grants || []).slice();
       });
       if (cb) cb();
     })
@@ -2183,19 +2245,9 @@ function onGrantUserChange() {
   }
   if (allGrantsCache === null) { loadAllGrants(() => onGrantUserChange()); return; }
   grantChecked = {};
-  (allGrantsCache[email] || []).forEach(tid => { if (tagById[tid]) grantChecked[tid] = true; });
+  (allGrantsCache[email] || []).forEach(g => { if (tagById[g.tagId]) grantChecked[g.tagId] = g.permission; });
   wrap.style.display = '';
   renderGrantTree();
-}
-
-// 某標籤是否因上層被授權而「已繼承」
-function isGrantInherited(tagId) {
-  let cur = (tagById[tagId] || {}).parent_id || '';
-  while (cur && tagById[cur]) {
-    if (grantChecked[cur]) return true;
-    cur = tagById[cur].parent_id || '';
-  }
-  return false;
 }
 
 function renderGrantTree() {
@@ -2207,13 +2259,15 @@ function renderGrantTree() {
   }
   let html = '';
   const walk = (tag, depth) => {
-    const inherited = isGrantInherited(tag.tag_id);
-    const checked = (inherited || grantChecked[tag.tag_id]) ? 'checked' : '';
-    const disabled = inherited ? 'disabled' : '';
-    const badge = inherited ? '<span class="inherited-tag">已繼承</span>' : '';
+    const eff = permEffective(grantChecked, tag.tag_id);
+    const inh = permInherited(grantChecked, tag.tag_id);
+    const checked = eff ? 'checked' : '';
+    const disabled = inh ? 'disabled' : '';   // 繼承中不可取消勾選
+    const badge = (inh && !grantChecked[tag.tag_id]) ? '<span class="inherited-tag">已繼承</span>' : '';
     html += `<label class="grant-opt" style="padding-left:${2 + depth * 16}px">
       <input type="checkbox" ${checked} ${disabled} onchange="onGrantToggle('${escapeHtml(tag.tag_id)}',this.checked)">
       <span>${escapeHtml(tag.name)}</span>${badge}
+      ${permChipHtml(grantChecked, tag.tag_id, 'onGrantPermCycle')}
     </label>`;
     (tagChildren[tag.tag_id] || []).forEach(c => walk(c, depth + 1));
   };
@@ -2222,15 +2276,19 @@ function renderGrantTree() {
 }
 
 function onGrantToggle(tagId, on) {
-  if (on) grantChecked[tagId] = true; else delete grantChecked[tagId];
+  if (on) grantChecked[tagId] = 'read'; else delete grantChecked[tagId];
   renderGrantTree(); // 重新計算子節點「已繼承」顯示
+}
+function onGrantPermCycle(tagId) {
+  permCycle(grantChecked, tagId);
+  renderGrantTree();
 }
 
 function saveGrants() {
   const email = document.getElementById('grantUserSelect').value.toLowerCase();
   if (!email) { showToast('請先選擇使用者'); return; }
   // 只送「明確勾選且未被上層涵蓋」的最小授權集合
-  const explicit = Object.keys(grantChecked).filter(id => tagById[id] && !isGrantInherited(id));
+  const explicit = permExplicitItems(grantChecked);
 
   showLoading(true);
   google.script.run
@@ -2238,9 +2296,9 @@ function saveGrants() {
       showLoading(false);
       if (!res || !res.success) { showToast('授權失敗：' + ((res && res.error) || '未知錯誤')); return; }
       if (allGrantsCache === null) allGrantsCache = {};
-      allGrantsCache[email] = (res.tagIds || explicit).slice();
+      allGrantsCache[email] = (res.grants || explicit).slice();
       grantChecked = {};
-      allGrantsCache[email].forEach(tid => { if (tagById[tid]) grantChecked[tid] = true; });
+      allGrantsCache[email].forEach(g => { if (tagById[g.tagId]) grantChecked[g.tagId] = g.permission; });
       renderGrantTree();
       showToast('已儲存授權（' + allGrantsCache[email].length + ' 項）');
     })
@@ -2253,7 +2311,7 @@ function saveGrants() {
 // ============================================================
 let orgOptionsCache = null;   // {orgs:[{code,name,level,parentCode}], titles:[...]}
 let groupGrantsCache = null;  // [{org_code, org_name, title, tag_id}]
-let ggChecked = {};           // 目前 (org,title) 組合勾選中的 tag_id → true
+let ggChecked = {};           // 目前 (org,title) 組合勾選中的 tag_id → 'read'|'edit'
 let ggComboList = [];         // renderGroupGrantList 填入；編輯/刪除按鈕以數字索引引用（避免字串內插 XSS）
 
 function loadOrgOptions(cb) {
@@ -2320,19 +2378,9 @@ function onGgComboChange() {
   ggChecked = {};
   groupGrantsCache
     .filter(g => g.org_code === c.org && g.title === c.title)
-    .forEach(g => { if (tagById[g.tag_id]) ggChecked[g.tag_id] = true; });
+    .forEach(g => { if (tagById[g.tag_id]) ggChecked[g.tag_id] = g.permission || 'read'; });
   wrap.style.display = '';
   renderGgTagTree();
-}
-
-// 標籤是否因上層已勾選而「已繼承」（沿用個人授權的語意）
-function isGgInherited(tagId) {
-  let cur = (tagById[tagId] || {}).parent_id || '';
-  while (cur && tagById[cur]) {
-    if (ggChecked[cur]) return true;
-    cur = tagById[cur].parent_id || '';
-  }
-  return false;
 }
 
 function renderGgTagTree() {
@@ -2344,13 +2392,15 @@ function renderGgTagTree() {
   }
   let html = '';
   const walk = (tag, depth) => {
-    const inherited = isGgInherited(tag.tag_id);
-    const checked = (inherited || ggChecked[tag.tag_id]) ? 'checked' : '';
-    const disabled = inherited ? 'disabled' : '';
-    const badge = inherited ? '<span class="inherited-tag">已繼承</span>' : '';
+    const eff = permEffective(ggChecked, tag.tag_id);
+    const inh = permInherited(ggChecked, tag.tag_id);
+    const checked = eff ? 'checked' : '';
+    const disabled = inh ? 'disabled' : '';
+    const badge = (inh && !ggChecked[tag.tag_id]) ? '<span class="inherited-tag">已繼承</span>' : '';
     html += `<label class="grant-opt" style="padding-left:${2 + depth * 16}px">
       <input type="checkbox" ${checked} ${disabled} onchange="onGgToggle('${escapeHtml(tag.tag_id)}',this.checked)">
       <span>${escapeHtml(tag.name)}</span>${badge}
+      ${permChipHtml(ggChecked, tag.tag_id, 'onGgPermCycle')}
     </label>`;
     (tagChildren[tag.tag_id] || []).forEach(ch => walk(ch, depth + 1));
   };
@@ -2359,7 +2409,11 @@ function renderGgTagTree() {
 }
 
 function onGgToggle(tagId, on) {
-  if (on) ggChecked[tagId] = true; else delete ggChecked[tagId];
+  if (on) ggChecked[tagId] = 'read'; else delete ggChecked[tagId];
+  renderGgTagTree();
+}
+function onGgPermCycle(tagId) {
+  permCycle(ggChecked, tagId);
   renderGgTagTree();
 }
 
@@ -2367,7 +2421,7 @@ function saveGroupGrants() {
   const c = ggCurrentCombo();
   if (!c.org && !c.title) { showToast('組織與職稱至少擇一'); return; }
   // 只送「明確勾選且未被上層涵蓋」的最小授權集合
-  const explicit = Object.keys(ggChecked).filter(id => tagById[id] && !isGgInherited(id));
+  const explicit = permExplicitItems(ggChecked);
 
   showLoading(true);
   google.script.run
@@ -2376,7 +2430,7 @@ function saveGroupGrants() {
       if (!res || !res.success) { showToast('儲存失敗：' + ((res && res.error) || '未知錯誤')); return; }
       groupGrantsCache = null; // 授權列已變，重新載入權威資料
       loadGroupGrants(() => onGgComboChange());
-      showToast('已儲存群組授權（' + (res.tagIds || []).length + ' 項）');
+      showToast('已儲存群組授權（' + (res.grants || []).length + ' 項）');
     })
     .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
     .apiSetGroupGrants(c.org, c.title, explicit);
@@ -2393,8 +2447,8 @@ function renderGroupGrantList() {
   const combos = {};
   list.forEach(g => {
     const key = JSON.stringify([g.org_code, g.title]); // 無碰撞鍵（org/title 可能含空白）
-    if (!combos[key]) combos[key] = { org_code: g.org_code, org_name: g.org_name, title: g.title, tagIds: [] };
-    combos[key].tagIds.push(g.tag_id);
+    if (!combos[key]) combos[key] = { org_code: g.org_code, org_name: g.org_name, title: g.title, items: [] };
+    combos[key].items.push({ tagId: g.tag_id, permission: g.permission || 'read' });
   });
   // 按鈕以「數字索引」引用組合，絕不把 org_code/title 塞進 onclick 字串
   // （escapeHtml 不轉義單引號，字串內插到 onclick 會造成 JS-context XSS）。
@@ -2402,8 +2456,8 @@ function renderGroupGrantList() {
   host.innerHTML = ggComboList.map((cb, i) => {
     const orgLabel = cb.org_code ? `${escapeHtml(cb.org_name || cb.org_code)}` : '（不限組織）';
     const ttlLabel = cb.title ? escapeHtml(cb.title) : '（不限職稱）';
-    const chips = cb.tagIds.map(tid =>
-      `<span class="tag-chip">${escapeHtml((tagById[tid] || {}).name || tid)}</span>`).join(' ');
+    const chips = cb.items.map(it =>
+      `<span class="tag-chip">${escapeHtml((tagById[it.tagId] || {}).name || it.tagId)}${it.permission === 'edit' ? '・✏️' : ''}</span>`).join(' ');
     return `<div class="gg-row" style="padding:6px 0;border-bottom:1px solid #e5e7eb">
       <div><strong>${orgLabel}</strong>／${ttlLabel}</div>
       <div style="margin:4px 0">${chips}</div>
@@ -2459,11 +2513,15 @@ function onPreviewUserChange() {
         host.innerHTML = '<div class="grant-hint">此人目前沒有任何授權標籤（僅能看到自己負責的文件）。</div>';
         return;
       }
-      host.innerHTML = list.map(item =>
-        `<div style="padding:4px 0">
+      host.innerHTML = list.map(item => {
+        const isEdit = item.permission === 'edit';
+        const permBadge = `<span class="perm-chip ${isEdit ? 'perm-edit' : 'perm-read'}" style="pointer-events:none">${isEdit ? '✏️ 編輯' : '👁 讀取'}</span>`;
+        return `<div style="padding:4px 0">
           <span class="tag-chip">${escapeHtml((tagById[item.tag_id] || {}).name || item.tag_id)}</span>
-          <span class="field-hint">${escapeHtml(item.source)}</span>
-        </div>`).join('');
+          ${permBadge}
+          <span class="field-hint">${escapeHtml((item.sources || []).join('、'))}</span>
+        </div>`;
+      }).join('');
     })
     .withFailureHandler(err => {
       host.innerHTML = '<div class="grant-hint">查詢失敗：' + escapeHtml(err.message) + '</div>';
