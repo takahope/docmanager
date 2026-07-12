@@ -87,7 +87,7 @@ This is the core algorithmic complexity of the project — read these functions 
 
 `index.html` calls backend functions via `google.script.run.withSuccessHandler(...).withFailureHandler(...)` (every call must have a failure handler). Exposed API surface:
 
-- `apiGetInitData()` — docs (filtered to the visible set) + option lists + `statusTransitions` + `user` context (with `grantedTagIds`, V5: `{read, edit}` Sets) + `editableDocIds` (V5: filtered to editable set) + `hrPeople` (owner dropdown) + `tags` (all tags — folder tree needs names) + `docTags` (visible docs only)
+- `apiGetInitData()` — docs (filtered to the visible set) + option lists + `statusTransitions` + `user` context (with `grantedTagIds`: read-tier tag ids, unchanged shape) + `editableDocIds` (V5: doc ids the user may edit, filtered to the editable set) + `hrPeople` (owner dropdown) + `tags` (all tags — folder tree needs names) + `docTags` (visible docs only)
 - `apiCreateDoc(doc)` (may carry `tagIds`) / `apiUpdateDoc(doc)` / `apiDeleteDoc(docId)` (admin only; cascades doc-tag rows)
 - `apiGetDescendants(docId, maxDepth)` / `apiGetAncestors(docId)` — `_assertCanViewDoc` at entry, results re-filtered to the visible set
 - `apiAddRelation(...)` (returns `deprecated` doc_id when supersedes auto-deprecates) / `apiRemoveRelation(...)`
