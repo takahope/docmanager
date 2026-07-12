@@ -354,13 +354,15 @@ function apiUpdateDoc(doc) {
     }
 
     // 發布日／下次審查日：預設沿用舊值；轉「已發布」時重算
-    // V6：version / file_id / pending_* 一律沿用 oldDoc，前端送來的值一律忽略——
-    // 唯一改動這些欄位的路徑是下方「核准發布時 promote」與 apiUploadDocFile。
+    // V6：version / file_id / pending_* / drive_loc 一律沿用 oldDoc，前端送來的值一律忽略——
+    // 唯一改動 version/file_id/pending_* 的路徑是下方「核准發布時 promote」與 apiUploadDocFile；
+    // drive_loc（V6 起表單已移除該欄位，前端不再送出）純粹沿用舊值，避免編輯時被清空。
     const merged = Object.assign({}, doc, {
       published_at: oldDoc.published_at,
       next_review:  oldDoc.next_review,
       status: newStatus,
       version: oldDoc.version,
+      drive_loc: oldDoc.drive_loc,
       file_id: oldDoc.file_id,
       pending_file_id: oldDoc.pending_file_id,
       pending_version: oldDoc.pending_version,
@@ -395,7 +397,7 @@ function apiUpdateDoc(doc) {
       ? `${oldStatus} → ${newStatus}` +
         (merged.published_at !== oldDoc.published_at ? `（發布日 ${merged.published_at}，下次審查 ${merged.next_review}）` : '') +
         (promotedVersion ? `｜檔案 v${promotedVersion} 生效` : '')
-      : (_diffSummary(oldDoc, doc) || '（無欄位變更）');
+      : (_diffSummary(oldDoc, merged) || '（無欄位變更）');
     _logAudit(action, doc.doc_id, merged.version, summary);
 
     SpreadsheetApp.flush();
