@@ -610,10 +610,11 @@
         <div class="field-hint">用於權限判定：此信箱的使用者可編輯本文件</div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>版本</label><input id="f_version" placeholder="例：1.0"></div>
+        <div class="form-group"><label>版本</label><input id="f_version" readonly>
+          <div class="field-hint">版本由系統管理：上傳檔案時選擇小改版／大改版，核准發布後才生效</div>
+        </div>
         <div class="form-group"><label>審查週期（月）</label><select id="f_review_cycle"></select></div>
       </div>
-      <div class="form-group"><label>Google Drive 位置</label><input id="f_drive_loc" placeholder="https://drive.google.com/..."></div>
 
       <div class="form-group" id="tagFieldGroup">
         <label>標籤 <span id="tagSelCount" class="field-hint" style="display:inline"></span></label>
@@ -1581,7 +1582,6 @@ function openDocModal(docId) {
     document.getElementById('f_owner').value = doc.owner;
     document.getElementById('f_owner_email').value = doc.owner_email || '';
     document.getElementById('f_version').value = doc.version;
-    document.getElementById('f_drive_loc').value = doc.drive_loc;
     cycleSel.value = doc.review_cycle || '12';
     ownerSel.value = (doc.owner_email || '').toLowerCase();
   } else {
@@ -1589,7 +1589,6 @@ function openDocModal(docId) {
     document.getElementById('f_owner').value = currentUser.name || '';
     document.getElementById('f_owner_email').value = currentUser.email || '';
     document.getElementById('f_version').value = '0.1';
-    document.getElementById('f_drive_loc').value = '';
     stSel.value = '草稿';
     cycleSel.value = '12';
     ownerSel.value = (currentUser.email || '').toLowerCase();
@@ -1615,7 +1614,6 @@ function saveDoc() {
     owner: document.getElementById('f_owner').value.trim(),
     owner_email: document.getElementById('f_owner_email').value.trim(),
     version: document.getElementById('f_version').value.trim(),
-    drive_loc: document.getElementById('f_drive_loc').value.trim(),
     review_cycle: document.getElementById('f_review_cycle').value,
   };
   if (!payload.title) { showToast('請輸入標題'); return; }
@@ -1643,6 +1641,7 @@ function saveDoc() {
             updated_at: todayStr,
             published_at: res.published_at ?? allDocs[idx].published_at,
             next_review:  res.next_review ?? allDocs[idx].next_review,
+            version:      res.version ?? allDocs[idx].version,
           });
         }
         // 更新：標籤有變更才另呼叫 apiSetDocTags 覆寫
