@@ -710,7 +710,7 @@ let tagChildren = {};     // parent_id('' 為根) -> [tag,...]（依 sort 排序
 let docTagIds = {};       // doc_id -> [tag_id,...]
 let selectedFolder = { type: 'all' };  // {type:'all'} | {type:'untagged'} | {type:'tag', id}
 let collapsedFolders = {};             // tag_id -> true（資料夾樹收合狀態）
-let allGrantsCache = null;             // {email(lower): [tag_id,...]}（管理員授權面板用）
+let allGrantsCache = null;             // {email(lower): [{tagId,permission},...]}（管理員授權面板用，V5 帶權限等級）
 // 標籤多選（文件 modal）狀態
 let modalTagIds = [];
 let modalTagIdsOriginal = [];
@@ -2310,7 +2310,7 @@ function saveGrants() {
 // 群組授權（V4，僅管理員）
 // ============================================================
 let orgOptionsCache = null;   // {orgs:[{code,name,level,parentCode}], titles:[...]}
-let groupGrantsCache = null;  // [{org_code, org_name, title, tag_id}]
+let groupGrantsCache = null;  // [{org_code, org_name, title, tag_id, permission}]（V5 帶權限等級）
 let ggChecked = {};           // 目前 (org,title) 組合勾選中的 tag_id → 'read'|'edit'
 let ggComboList = [];         // renderGroupGrantList 填入；編輯/刪除按鈕以數字索引引用（避免字串內插 XSS）
 
