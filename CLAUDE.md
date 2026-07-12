@@ -10,6 +10,8 @@ V2 (2026-07) added: HR-whitelist access control, role-based editing, status-flow
 
 V5 (2026-07) added: two-level permission model (read/edit) on tags and group grants; `_getEditableDocIds` authority; edit-gated write APIs; edit-only document detail editing and tag-management UI.
 
+V6 (2026-07) added: 文件檔案上傳與版本管理——上傳新檔轉「審核中」，管理員核准「已發布」時版號才 promote 生效；每版一檔存進部署者中央 Drive 資料夾；下載一律經後端權限檢查代理，不設 Drive 共用。
+
 ## File Structure & Responsibilities
 
 | File | Responsibility |
@@ -30,8 +32,9 @@ There is no local build or test command; syntax can be checked with `node --chec
    - `env.gs` ← `env.js`, `deploy.gs` ← `deploy.js`, `auth.gs` ← `auth.js`, `audit.gs` ← `audit.js`, `code.gs` ← `code.js`
    - `index.html` (create as type "HTML")
 3. Script Properties (Project Settings): set `HR_SPREADSHEET_ID` (HR master spreadsheet) and `ADMIN_EMAILS` (comma-separated) — **never hardcode these in env.js (PLAYBOOK P6)**
-4. Run `authorizeOnce()` once in the editor → authorize scopes (Sheets read on HR file)
+4. Run `authorizeOnce()` once in the editor → authorize scopes (Sheets read on HR file)（V6 起新增 `DriveApp` 存取，升級既有部署需重新執行本步驟以取得新 scope 授權）
 5. Run `deployAllSheets()` (new install) or `migrateV2()` (V1→V2) or `migrateV6()` (V4→V5, adding permission columns — idempotent, safe to re-run)
+   - `migrateV7()`（V5→V6，補文件清單 M–P 欄、建立「檔案版本」表、確保中央檔案資料夾存在——冪等，可重跑；新裝的 `deployAllSheets()` 已含 V6 結構不需再跑）
 6. (Optional) `seedSampleData()`; run `debugGetSystemData()` to verify HR headers + whitelist count
 7. Deploy → New deployment → Web app (execute as: me; access: domain). `clasp push` only updates /dev; /exec needs a new deployment version.
 
@@ -40,7 +43,7 @@ There is no local build or test command; syntax can be checked with `node --chec
 ### Data Model (Google Sheets)
 
 **Sheet "文件清單" (Documents)** — columns defined in `DOC_COL` (env.js):
-`doc_id` (DOC-001 format, text-forced), `title`, `category`, `status`, `owner`, `owner_ID` (text-forced), `updated_at`, `version`, `google_drive_location`, `owner_email` (permission match), `published_at`, `next_review_date`, `review_cycle_months`. Columns J–M are V2 additions; date columns are text-forced (`@`) to avoid Date serialization issues.
+`doc_id` (DOC-001 format, text-forced), `title`, `category`, `status`, `owner`, `owner_ID` (text-forced), `updated_at`, `version`, `google_drive_location`, `owner_email` (permission match), `published_at`, `next_review_date`, `review_cycle_months`. Columns J–M are V2 additions; date columns are text-forced (`@`) to avoid Date serialization issues. V6 新增 M–P 欄：`file_id`（現行生效版檔案 ID）、`pending_file_id`／`pending_version`／`pending_file_name`（待核版，核准發布時 promote 為正式版）。`google_drive_location`（H 欄）為 legacy 手動連結，僅顯示不再接受輸入。
 
 **Sheet "文件關聯" (Closure Table)** — columns defined in `CLS_COL` (env.js):
 `doc_id` (ancestor), `descendant_id`, `depth` (0=self, 1=direct, 2+=indirect), `relation_type`, `說明` (note).
@@ -54,6 +57,9 @@ There is no local build or test command; syntax can be checked with `node --chec
 **Sheet "使用者授權" (User Grants)** — columns in `GRANT_COL` (V3, V5 adds column 3): `email` (lowercased) | `tag_id` | `permission` (one grant per row). `permission` field: empty = `read` (default), `'edit'` = edit access (fail-closed — only these two values). Grants are **not** HR-cached — they take effect immediately.
 
 **Sheet "群組授權" (Group Grants)** — columns in `GROUPGRANT_COL` (V4, V5 adds column 4): `org_code` | `title` | `tag_id` | `permission` (one grant per row; at least one of org_code/title non-empty). `permission` field: empty = `read` (default), `'edit'` = edit access (fail-closed). Group membership is resolved live from the HR master's 組織架構樹 + 人員職務配置 sheets (cached 10 min) — this system stores only the (group → tag) mapping. **org_code matches direct members only (no org-subtree expansion)** — deliberately opposite to the tag tree's parent-includes-child inheritance.
+
+**Sheet "檔案版本" (File Versions)** — columns defined in `FILEVER_COL` (env.js，V6）：
+`doc_id` | `version`（生效版號） | `file_id`（Drive 檔案 ID） | `file_name`（原始檔名） | `uploaded_by` | `uploaded_at`。僅登記**正式生效**版本（`apiUpdateDoc` 核准發布時 append），待核版不入表。
 
 ### Permission model (auth.js)
 
@@ -94,6 +100,9 @@ This is the core algorithmic complexity of the project — read these functions 
 - `apiGetGraphData()` — nodes + direct edges, both filtered to the visible set; rendered as a pure-SVG layered DAG (longest-path layering — safe because closure table guarantees acyclicity)
 - `apiGetDocHistory(docId)` — audit rows for one document (`_assertCanViewDoc` at entry)
 - `apiSetDocTags(docId, tagIds)` (`_assertOwnerOrAdmin`, overwrites the doc's tag rows; V5: edit grantees may not call this) — V3
+- `apiUploadDocFile(docId, fileName, base64, mimeType, bumpType)`（`_assertCanEditDoc`；bumpType='minor'|'major'；寫入 pending 欄並將文件轉入「審核中」）— V6
+- `apiDownloadDocFile(docId, fileId)`（`_assertCanViewDoc`；代理下載，檔案不設 Drive 共用；fileId 須屬於該文件現行/待核/歷史版本，否則拒絕）— V6
+- `apiGetDocFileVersions(docId)`（`_assertCanViewDoc`；回傳該文件的正式版本歷史，新→舊）— V6
 - `apiCreateTag(name, parentId)` / `apiRenameTag(tagId, name)` / `apiMoveTag(tagId, newParentId)` (cycle-checked) / `apiDeleteTag(tagId)` (cascades doc-tag + grant rows) — admin only, V3
 - `apiSetUserGrants(email, grants)` / `apiGetAllGrants()` — admin only, V3 (V5: grants=[{tagId, permission}], full-set overwrite, `[]` deletes)
 - `apiGetGroupGrants()` / `apiSetGroupGrants(orgCode, title, grants)` (full-set overwrite per combo, `[]` deletes; V5: grants=[{tagId, permission}]) / `apiGetOrgOptions()` / `apiPreviewUserTags(email)` (V5: returns {tagId, permission} pairs) — admin only, V4
