@@ -103,6 +103,7 @@ This is the core algorithmic complexity of the project — read these functions 
 - `apiUploadDocFile(docId, fileName, base64, mimeType, bumpType, customVersion)`（`_assertCanEditDoc`；bumpType='minor'|'major'|'start'；寫入 pending 欄並將文件轉入「審核中」。`bumpType='start'` 為管理員專用的自訂起始版號路徑——僅文件尚無任何檔案（`file_id`／`pending_file_id` 皆空）時可用，額外要求 `ctx.isAdmin`，`customVersion` 需符合 `X.Y` 數字格式，不經過 `_bumpVersion`）— V6
 - `apiDownloadDocFile(docId, fileId)`（`_assertCanViewDoc`；代理下載，檔案不設 Drive 共用；fileId 須屬於該文件現行/待核/歷史版本，否則拒絕）— V6
 - `apiGetDocFileVersions(docId)`（`_assertCanViewDoc`；回傳該文件的正式版本歷史，新→舊）— V6
+- `apiBatchApproveDocuments(docIds)`（`_assertAdmin`；批次「審核中→已發布」，逐筆獨立成功/失敗，回傳 `{approved:[...], failed:[{doc_id,error}...]}`；`docIds` 先用 `Set` 去重）— V6
 - `apiCreateTag(name, parentId)` / `apiRenameTag(tagId, name)` / `apiMoveTag(tagId, newParentId)` (cycle-checked) / `apiDeleteTag(tagId)` (cascades doc-tag + grant rows) — admin only, V3
 - `apiSetUserGrants(email, grants)` / `apiGetAllGrants()` — admin only, V3 (V5: grants=[{tagId, permission}], full-set overwrite, `[]` deletes)
 - `apiGetGroupGrants()` / `apiSetGroupGrants(orgCode, title, grants)` (full-set overwrite per combo, `[]` deletes; V5: grants=[{tagId, permission}]) / `apiGetOrgOptions()` / `apiPreviewUserTags(email)` (V5: returns {tagId, permission} pairs) — admin only, V4
