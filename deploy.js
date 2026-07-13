@@ -104,11 +104,7 @@ function _deployDocSheet(ss) {
   sheet.getRange('D2:D1000').setDataValidation(statusRule);
 
   // 資料驗證：category 下拉
-  const catRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(DOC_CATEGORIES, true)
-    .setAllowInvalid(false)
-    .build();
-  sheet.getRange('C2:C1000').setDataValidation(catRule);
+  _applyCategoryDataValidation(sheet);
 
   // 條件格式：status 顏色標示
   const statusColors = {
@@ -132,6 +128,17 @@ function _deployDocSheet(ss) {
   _applyDocSheetFormats(sheet);
 
   Logger.log(`✅ ${SHEET_NAMES.DOCS} 初始化完成`);
+}
+
+// category (C) 下拉選單驗證（deployAllSheets 與 migrateDocCategoryDropdown 共用）
+// 直接覆寫既有規則，天生冪等——每次都套用 DOC_CATEGORIES 目前的值，
+// 不需要「已存在就跳過」的判斷。
+function _applyCategoryDataValidation(sheet) {
+  const catRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(DOC_CATEGORIES, true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange('C2:C1000').setDataValidation(catRule);
 }
 
 // 新欄位的格式與驗證（deployAllSheets 與 migrate 共用）
@@ -471,6 +478,24 @@ function migrateV7ImportLegacyFiles() {
   }
 }
 
+// ── 選用工具：重新套用文件類別下拉選單 ──────────────────────
+// C 欄的下拉選單驗證是建表當下寫死到儲存格的規則，不會因為改了
+// env.js 的 DOC_CATEGORIES 常數就自動更新既有試算表。改動
+// DOC_CATEGORIES 後，在既有已部署的試算表上執行本函式一次即可
+// 讓下拉選單同步成目前的清單；天生冪等，可重複執行。
+// 注意：僅更新下拉選單本身，不會改寫既有文件列上已經寫入的舊分類
+// 字串——那些需要另外盤點、人工決定新分類的對應規則。
+function migrateDocCategoryDropdown() {
+  const ss = SpreadsheetApp.openById(ENV.SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_NAMES.DOCS);
+  if (!sheet) throw new Error(`找不到工作表：${SHEET_NAMES.DOCS}，請先執行 deployAllSheets()`);
+
+  _applyCategoryDataValidation(sheet);
+
+  SpreadsheetApp.flush();
+  Logger.log(`✅ migrateDocCategoryDropdown 完成，目前分類清單：${DOC_CATEGORIES.join('、')}`);
+}
+
 // ── 寫入測試資料（選用）──────────────────────────────────────
 function seedSampleData() {
   const ss = SpreadsheetApp.openById(ENV.SPREADSHEET_ID);
@@ -484,13 +509,13 @@ function seedSampleData() {
     'Asia/Taipei', 'yyyy/MM/dd');
 
   const docs = [
-    ['DOC-001', '資訊安全政策總綱', 'ISMS', '已發布', '王小明', 'U001', today, '1.0', '', 'ming@example.com',  today, nextYear, 12],
-    ['DOC-002', '存取控制程序書',   'ISMS', '已發布', '李大華', 'U002', today, '2.1', '', 'hua@example.com',   today, nextYear, 12],
-    ['DOC-003', '事件回應程序書',   'ISMS', '審核中', '陳美玲', 'U003', today, '1.3', '', 'mei@example.com',   '', '', 12],
-    ['DOC-004', '稽核作業程序書',   'ISMS', '草稿',   '王小明', 'U001', today, '0.2', '', 'ming@example.com',  '', '', 12],
-    ['DOC-005', '帳號申請表單',     '表單', '已發布', '李大華', 'U002', today, '1.0', '', 'hua@example.com',   today, nextYear, 12],
-    ['DOC-006', '權限異動紀錄表',   '表單', '已發布', '李大華', 'U002', today, '1.0', '', 'hua@example.com',   today, nextYear, 12],
-    ['DOC-007', '帳號停用申請單',   '表單', '草稿',   '陳美玲', 'U003', today, '0.1', '', 'mei@example.com',   '', '', 12],
+    ['DOC-001', '資訊安全政策總綱', 'ISO管理系統', '已發布', '王小明', 'U001', today, '1.0', '', 'ming@example.com',  today, nextYear, 12],
+    ['DOC-002', '存取控制程序書',   '標準作業流程(cSOP)', '已發布', '李大華', 'U002', today, '2.1', '', 'hua@example.com',   today, nextYear, 12],
+    ['DOC-003', '事件回應程序書',   '標準作業流程(cSOP)', '審核中', '陳美玲', 'U003', today, '1.3', '', 'mei@example.com',   '', '', 12],
+    ['DOC-004', '稽核作業程序書',   '管理辦法(C)', '草稿',   '王小明', 'U001', today, '0.2', '', 'ming@example.com',  '', '', 12],
+    ['DOC-005', '帳號申請表單',     '紀錄', '已發布', '李大華', 'U002', today, '1.0', '', 'hua@example.com',   today, nextYear, 12],
+    ['DOC-006', '權限異動紀錄表',   '紀錄', '已發布', '李大華', 'U002', today, '1.0', '', 'hua@example.com',   today, nextYear, 12],
+    ['DOC-007', '帳號停用申請單',   '紀錄', '草稿',   '陳美玲', 'U003', today, '0.1', '', 'mei@example.com',   '', '', 12],
   ];
 
   docSheet.getRange(2, 1, docs.length, docs[0].length).setValues(docs);

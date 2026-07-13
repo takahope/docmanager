@@ -17,7 +17,7 @@ V6 (2026-07) added: 文件檔案上傳與版本管理——上傳新檔轉「審
 | File | Responsibility |
 |---|---|
 | `env.js` | Centralized config: sheet names, column index constants (`DOC_COL`/`CLS_COL`/`AUDIT_COL`/`HR_COL`), `STATUS_TRANSITIONS` map, option lists, Script Properties key names (`PROP_KEYS`) |
-| `deploy.js` | `deployAllSheets()` creates the three sheets; `migrateV2()` idempotently adds J–M columns + audit sheet to a V1 spreadsheet; `migrateV6()` adds read/edit permission columns to 使用者授權 and 群組授權 sheets (V4→V5 upgrade); `seedSampleData()` |
+| `deploy.js` | `deployAllSheets()` creates the three sheets; `migrateV2()` idempotently adds J–M columns + audit sheet to a V1 spreadsheet; `migrateV6()` adds read/edit permission columns to 使用者授權 and 群組授權 sheets (V4→V5 upgrade); `migrateDocCategoryDropdown()` re-applies the 文件清單 C 欄 dropdown validation to the current `DOC_CATEGORIES` list — re-run whenever that constant changes, since Sheets bakes the dropdown's value list in at creation time and won't pick up code changes on its own; `seedSampleData()` |
 | `auth.js` | Permission layer: HR whitelist (CacheService 10 min), `getUserContext()`, `_assertWhitelisted/_assertCanEditDoc/_assertAdmin`, `authorizeOnce()`, `debugGetSystemData()`, `clearHrCache()` |
 | `audit.js` | `_logAudit()` (called inside locks; swallows its own errors), `_diffSummary()`, `apiGetDocHistory(docId)` |
 | `code.js` | `doGet` whitelist gate, document CRUD, Closure Table maintenance, all other `apiXxx` functions |
@@ -35,6 +35,7 @@ There is no local build or test command; syntax can be checked with `node --chec
 4. Run `authorizeOnce()` once in the editor → authorize scopes (Sheets read on HR file)（V6 起新增 `DriveApp` 存取，升級既有部署需重新執行本步驟以取得新 scope 授權）
 5. Run `deployAllSheets()` (new install) or `migrateV2()` (V1→V2) or `migrateV6()` (V4→V5, adding permission columns — idempotent, safe to re-run)
    - `migrateV7()`（V5→V6，補文件清單 M–P 欄、建立「檔案版本」表、確保中央檔案資料夾存在——冪等，可重跑；新裝的 `deployAllSheets()` 已含 V6 結構不需再跑）
+   - `migrateDocCategoryDropdown()`（非版本綁定的選用工具，重新套用 C 欄下拉選單成 `env.js` 目前的 `DOC_CATEGORIES`——每次改動這個常數後都要在既有已部署的試算表上重跑一次；只更新下拉選單本身，不會改寫既有文件列上已寫入的舊分類字串，需另外人工盤點）
 6. (Optional) `seedSampleData()`; run `debugGetSystemData()` to verify HR headers + whitelist count
 7. Deploy → New deployment → Web app (execute as: me; access: domain). `clasp push` only updates /dev; /exec needs a new deployment version.
 

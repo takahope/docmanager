@@ -190,4 +190,4 @@ const RELATION_TYPES = ['references', 'supersedes', 'derived_from', 'related'];
 const VERSION_BUMP_TYPES = ['minor', 'major']; // minor: X.Y→X.(Y+1)；major: X.Y→(X+1).0
 
 // ── 文件類別選項 ──────────────────────────────────────────────
-const DOC_CATEGORIES = ['ISMS', 'PIMS', '表單', 'SOP', '政策', '指引'];
+const DOC_CATEGORIES = ['ISO管理系統', '管理辦法(C)', '準則(cPOT)', '標準作業流程(cSOP)', '其他(cDOC)', '外來文件', '紀錄'];
