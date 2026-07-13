@@ -426,6 +426,77 @@ function apiUpdateDoc(doc) {
   }
 }
 
+// 批次核准文件（審核中 → 已發布）：管理員專用。逐筆獨立判斷可否核准，
+// 成功的照常生效（含 promote 待核檔案為正式版），失敗的記原因、不影響其他筆。
+// 與 apiUpdateDoc 核准發布分支邏輯重複但刻意不抽共用——apiUpdateDoc 承擔任意
+// 欄位更新與多種狀態轉移已經夠複雜，這裡只做單一轉移，各自獨立更清楚。
+function apiBatchApproveDocuments(docIds) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    _assertAdmin();
+    const ids = Array.from(new Set((docIds || []).map(String).filter(Boolean)));
+    if (ids.length === 0) return { success: true, approved: [], failed: [] };
+
+    const sheet = _getSheet(SHEET_NAMES.DOCS);
+    const rows = sheet.getDataRange().getDisplayValues();
+    const docs = _readDocs();
+    const fileVerSheet = _getSheet(SHEET_NAMES.FILE_VERSIONS);
+
+    const approved = [];
+    const failed = [];
+
+    ids.forEach(docId => {
+      const idx = rows.findIndex(r => r[DOC_COL.DOC_ID] === docId);
+      const oldDoc = docs.find(d => d.doc_id === docId);
+      if (idx < 1 || !oldDoc) {
+        failed.push({ doc_id: docId, error: '找不到文件' });
+        return;
+      }
+      if (oldDoc.status !== '審核中') {
+        failed.push({ doc_id: docId, error: `狀態為「${oldDoc.status}」，非審核中，無法核准` });
+        return;
+      }
+
+      const cycle = parseInt(oldDoc.review_cycle, 10) || DEFAULT_REVIEW_CYCLE;
+      const merged = Object.assign({}, oldDoc, {
+        status: '已發布',
+        published_at: _now(),
+        next_review: _addMonthsFromToday(cycle),
+      });
+
+      let promotedVersion = '';
+      if (oldDoc.pending_file_id) {
+        promotedVersion = oldDoc.pending_version;
+        merged.version = oldDoc.pending_version;
+        merged.file_id = oldDoc.pending_file_id;
+        merged.pending_file_id = '';
+        merged.pending_version = '';
+        merged.pending_file_name = '';
+      }
+
+      sheet.getRange(idx + 1, 1, 1, DOC_COL_COUNT).setValues([_docToRow(merged)]);
+
+      if (promotedVersion) {
+        fileVerSheet.appendRow([docId, promotedVersion, merged.file_id, oldDoc.pending_file_name, _getCurrentEmail(), _nowWithTime()]);
+      }
+
+      const summary = `審核中 → 已發布（發布日 ${merged.published_at}，下次審查 ${merged.next_review}）` +
+        (promotedVersion ? `｜檔案 v${promotedVersion} 生效` : '') + '（批次核准）';
+      _logAudit('狀態變更', docId, merged.version, summary);
+
+      approved.push(docId);
+    });
+
+    SpreadsheetApp.flush();
+    return { success: true, approved: approved, failed: failed };
+  } catch (e) {
+    return { success: false, error: String(e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // 代理下載文件檔案（V6）：檔案不設任何 Drive 共用，一律經此 API
 // 依現有可見性／可編輯性權限回傳內容，避免繞過標籤權限直接用連結存取。
 // fileId 必須屬於該文件（現行 file_id、pending_file_id，或其歷史版本），
