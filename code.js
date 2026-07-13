@@ -259,7 +259,7 @@ function apiCreateDoc(doc) {
 // 上傳新版檔案（V6）：寫入 pending 欄並將文件轉入「審核中」，
 // 待管理員核准發布時（apiUpdateDoc promote 邏輯）才正式生效。
 // bumpType：'minor' 或 'major'，決定 pending_version 怎麼算。
-function apiUploadDocFile(docId, fileName, base64, mimeType, bumpType) {
+function apiUploadDocFile(docId, fileName, base64, mimeType, bumpType, customVersion) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
@@ -272,7 +272,24 @@ function apiUploadDocFile(docId, fileName, base64, mimeType, bumpType) {
     if (!base64) return { success: false, error: '未提供檔案內容' };
 
     const safeName = _sanitizeFileName(fileName);
-    const pendingVersion = _bumpVersion(oldDoc.version, bumpType);
+    let pendingVersion;
+    if (bumpType === 'start') {
+      // 管理員自訂起始版號：僅文件首次上傳（尚無現行版或待核版）可用，
+      // 不經過 _bumpVersion，直接採信通過格式驗證的字串。
+      if (!ctx.isAdmin) {
+        return { success: false, error: '權限不足：僅管理員可設定自訂起始版號' };
+      }
+      if (oldDoc.file_id || oldDoc.pending_file_id) {
+        return { success: false, error: '此文件已有檔案，僅能使用小改版／大改版' };
+      }
+      const v = String(customVersion || '').trim();
+      if (!/^\d+\.\d+$/.test(v)) {
+        return { success: false, error: '起始版號格式錯誤，需為「數字.數字」，例如 3.2' };
+      }
+      pendingVersion = v;
+    } else {
+      pendingVersion = _bumpVersion(oldDoc.version, bumpType);
+    }
 
     const bytes = Utilities.base64Decode(base64);
     const blob = Utilities.newBlob(bytes, mimeType || 'application/octet-stream',
@@ -302,7 +319,7 @@ function apiUploadDocFile(docId, fileName, base64, mimeType, bumpType) {
       }
     }
 
-    const bumpLabel = bumpType === 'major' ? '大改版' : '小改版';
+    const bumpLabel = bumpType === 'major' ? '大改版' : bumpType === 'start' ? '自訂起始版號' : '小改版';
     _logAudit('上傳檔案', docId, pendingVersion,
       `上傳待核檔案「${safeName}」（${bumpLabel}，待核准後生效為 v${pendingVersion}）`);
 
@@ -476,6 +493,20 @@ function apiDeleteDoc(docId) {
     for (let i = dtRows.length - 1; i >= 1; i--) {
       if (dtRows[i][DOCTAG_COL.DOC_ID] === docId) {
         dtSheet.deleteRow(i + 1);
+      }
+    }
+
+    // 4. 級聯清除「檔案版本」中此文件的紀錄列（由下往上刪）——避免 doc_id
+    // 序號重用時，新文件繼承到舊文件不相干的版本歷史（V6 起才有此表，
+    // 尚未執行 migrateV7()/deployAllSheets() 的舊試算表可能還沒有，安全跳過）。
+    const ss = SpreadsheetApp.openById(ENV.SPREADSHEET_ID);
+    const fvSheet = ss.getSheetByName(SHEET_NAMES.FILE_VERSIONS);
+    if (fvSheet) {
+      const fvRows = fvSheet.getDataRange().getDisplayValues();
+      for (let i = fvRows.length - 1; i >= 1; i--) {
+        if (fvRows[i][FILEVER_COL.DOC_ID] === docId) {
+          fvSheet.deleteRow(i + 1);
+        }
       }
     }
 

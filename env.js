@@ -184,6 +184,9 @@ const DEFAULT_REVIEW_CYCLE = 12;
 const RELATION_TYPES = ['references', 'supersedes', 'derived_from', 'related'];
 
 // ── 版號改版類型（V6，上傳檔案時二選一，白名單驗證）────────────
+// 'start'（管理員自訂起始版號，僅文件首次上傳可用）刻意不列入此白名單——
+// 它不經過 _bumpVersion，是 apiUploadDocFile 內獨立的分流與檢查，
+// 讓 _bumpVersion 永遠只認 minor/major，避免日後被誤接進遞增邏輯。
 const VERSION_BUMP_TYPES = ['minor', 'major']; // minor: X.Y→X.(Y+1)；major: X.Y→(X+1).0
 
 // ── 文件類別選項 ──────────────────────────────────────────────

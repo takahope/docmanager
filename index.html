@@ -1543,11 +1543,19 @@ function renderFileSection(doc, fileVersions, editable, legacyDriveLink) {
         <button onclick="downloadDocFile('${escapeHtml(doc.doc_id)}','${escapeHtml(v.file_id)}')">下載</button>
       </div>`).join('');
 
+  // 自訂起始版號：僅管理員（真實身分＋管理視角）且文件尚無任何檔案（現行版／待核版皆空）時可用
+  const canCustomStart = editable && currentUser.isAdmin && isAdminView &&
+    !doc.file_id && !doc.pending_file_id;
+
   const uploadHtml = editable ? `
     <div style="margin-top:8px;padding:12px;border:1px dashed #cbd5e1;border-radius:6px">
       <input type="file" id="fileUploadInput_${escapeHtml(doc.doc_id)}" style="display:block;margin-bottom:8px">
-      <label style="margin-right:12px;font-size:13px"><input type="radio" name="bumpType_${escapeHtml(doc.doc_id)}" value="minor" checked> 小改版</label>
-      <label style="font-size:13px"><input type="radio" name="bumpType_${escapeHtml(doc.doc_id)}" value="major"> 大改版</label>
+      <label style="margin-right:12px;font-size:13px"><input type="radio" name="bumpType_${escapeHtml(doc.doc_id)}" value="minor" checked onchange="toggleCustomStartInput('${escapeHtml(doc.doc_id)}')"> 小改版</label>
+      <label style="margin-right:12px;font-size:13px"><input type="radio" name="bumpType_${escapeHtml(doc.doc_id)}" value="major" onchange="toggleCustomStartInput('${escapeHtml(doc.doc_id)}')"> 大改版</label>
+      ${canCustomStart ? `<label style="font-size:13px"><input type="radio" name="bumpType_${escapeHtml(doc.doc_id)}" value="start" onchange="toggleCustomStartInput('${escapeHtml(doc.doc_id)}')"> 自訂起始版號</label>
+      <div id="customStartWrap_${escapeHtml(doc.doc_id)}" style="display:none;margin-top:6px">
+        <input type="text" id="customStartInput_${escapeHtml(doc.doc_id)}" placeholder="例如 3.2" style="width:100px">
+      </div>` : ''}
       <button style="display:block;margin-top:8px" onclick="uploadDocFile('${escapeHtml(doc.doc_id)}')">上傳新版</button>
     </div>` : '';
 
@@ -1560,6 +1568,14 @@ function renderFileSection(doc, fileVersions, editable, legacyDriveLink) {
     <div style="max-height:160px;overflow-y:auto">${historyHtml}</div>`;
 }
 
+// 依目前選中的改版類型，切換自訂起始版號輸入框的顯示/隱藏
+function toggleCustomStartInput(docId) {
+  const wrap = document.getElementById('customStartWrap_' + docId);
+  if (!wrap) return;
+  const checked = document.querySelector(`input[name="bumpType_${docId}"]:checked`);
+  wrap.style.display = (checked && checked.value === 'start') ? '' : 'none';
+}
+
 // 上傳新版檔案：前端 20MB 上限檢查 → 讀成 base64 → 呼叫 apiUploadDocFile
 function uploadDocFile(docId) {
   const input = document.getElementById('fileUploadInput_' + docId);
@@ -1570,6 +1586,16 @@ function uploadDocFile(docId) {
 
   const bumpInput = document.querySelector(`input[name="bumpType_${docId}"]:checked`);
   const bumpType = bumpInput ? bumpInput.value : 'minor';
+
+  let customVersion = '';
+  if (bumpType === 'start') {
+    const customInput = document.getElementById('customStartInput_' + docId);
+    customVersion = (customInput ? customInput.value : '').trim();
+    if (!/^\d+\.\d+$/.test(customVersion)) {
+      showToast('起始版號格式錯誤，需為「數字.數字」，例如 3.2');
+      return;
+    }
+  }
 
   showLoading(true);
   const reader = new FileReader();
@@ -1593,7 +1619,7 @@ function uploadDocFile(docId) {
         selectDoc(docId);
       })
       .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
-      .apiUploadDocFile(docId, file.name, base64, file.type || 'application/octet-stream', bumpType);
+      .apiUploadDocFile(docId, file.name, base64, file.type || 'application/octet-stream', bumpType, customVersion);
   };
   reader.onerror = () => { showLoading(false); showToast('讀取檔案失敗'); };
   reader.readAsDataURL(file);

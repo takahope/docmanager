@@ -94,13 +94,13 @@ This is the core algorithmic complexity of the project — read these functions 
 `index.html` calls backend functions via `google.script.run.withSuccessHandler(...).withFailureHandler(...)` (every call must have a failure handler). Exposed API surface:
 
 - `apiGetInitData()` — docs (filtered to the visible set) + option lists + `statusTransitions` + `user` context (with `grantedTagIds`: read-tier tag ids, unchanged shape) + `editableDocIds` (V5: doc ids the user may edit, filtered to the editable set) + `hrPeople` (owner dropdown) + `tags` (all tags — folder tree needs names) + `docTags` (visible docs only)
-- `apiCreateDoc(doc)` (may carry `tagIds`) / `apiUpdateDoc(doc)` / `apiDeleteDoc(docId)` (admin only; cascades doc-tag rows)
+- `apiCreateDoc(doc)` (may carry `tagIds`) / `apiUpdateDoc(doc)` / `apiDeleteDoc(docId)` (admin only; cascades doc-tag rows + file-version rows — V6)
 - `apiGetDescendants(docId, maxDepth)` / `apiGetAncestors(docId)` — `_assertCanViewDoc` at entry, results re-filtered to the visible set
 - `apiAddRelation(...)` (returns `deprecated` doc_id when supersedes auto-deprecates) / `apiRemoveRelation(...)`
 - `apiGetGraphData()` — nodes + direct edges, both filtered to the visible set; rendered as a pure-SVG layered DAG (longest-path layering — safe because closure table guarantees acyclicity)
 - `apiGetDocHistory(docId)` — audit rows for one document (`_assertCanViewDoc` at entry)
 - `apiSetDocTags(docId, tagIds)` (`_assertOwnerOrAdmin`, overwrites the doc's tag rows; V5: edit grantees may not call this) — V3
-- `apiUploadDocFile(docId, fileName, base64, mimeType, bumpType)`（`_assertCanEditDoc`；bumpType='minor'|'major'；寫入 pending 欄並將文件轉入「審核中」）— V6
+- `apiUploadDocFile(docId, fileName, base64, mimeType, bumpType, customVersion)`（`_assertCanEditDoc`；bumpType='minor'|'major'|'start'；寫入 pending 欄並將文件轉入「審核中」。`bumpType='start'` 為管理員專用的自訂起始版號路徑——僅文件尚無任何檔案（`file_id`／`pending_file_id` 皆空）時可用，額外要求 `ctx.isAdmin`，`customVersion` 需符合 `X.Y` 數字格式，不經過 `_bumpVersion`）— V6
 - `apiDownloadDocFile(docId, fileId)`（`_assertCanViewDoc`；代理下載，檔案不設 Drive 共用；fileId 須屬於該文件現行/待核/歷史版本，否則拒絕）— V6
 - `apiGetDocFileVersions(docId)`（`_assertCanViewDoc`；回傳該文件的正式版本歷史，新→舊）— V6
 - `apiCreateTag(name, parentId)` / `apiRenameTag(tagId, name)` / `apiMoveTag(tagId, newParentId)` (cycle-checked) / `apiDeleteTag(tagId)` (cascades doc-tag + grant rows) — admin only, V3
