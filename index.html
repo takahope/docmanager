@@ -260,22 +260,6 @@
   }
   #toast.show { opacity: 1; }
 
-  /* ── 批次核准操作列（勾選文件後自底部滑出）── */
-  #approveBar {
-    position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 150%);
-    background: var(--primary); color: #fff; padding: 12px 20px; border-radius: var(--radius);
-    display: flex; align-items: center; gap: 16px; box-shadow: 0 4px 16px rgba(0,0,0,.2);
-    transition: transform .25s; z-index: 140; pointer-events: none;
-  }
-  #approveBar.show { transform: translate(-50%, 0); pointer-events: auto; }
-  #approveBar .approve-count { font-size: 14px; font-weight: 600; }
-  #approveBar button {
-    border: none; border-radius: var(--radius); padding: 8px 16px;
-    font-size: 14px; cursor: pointer; font-weight: 600;
-  }
-  #approveBar .btn-approve { background: #fff; color: var(--primary); }
-  #approveBar .btn-clear { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.5); }
-
   /* ── 首載進度條（house 規格：N 秒勻速到 90%，完成才跳 100%）── */
   #bootProgress {
     position: fixed; inset: 0; background: var(--bg); z-index: 300;
@@ -460,7 +444,7 @@
         <div class="table-scroll">
           <table>
             <thead>
-              <tr id="docTableHeadRow">
+              <tr>
                 <th>文件編號</th><th>標題</th><th>類別</th><th>狀態</th><th>負責人</th><th>版本</th><th>下次審查</th>
               </tr>
             </thead>
@@ -692,11 +676,6 @@
 </div>
 
 <div id="toast"></div>
-<div id="approveBar">
-  <span class="approve-count" id="approveCount"></span>
-  <button class="btn-approve" onclick="batchApproveSelected()">核准發布</button>
-  <button class="btn-clear" onclick="clearApprovalSelection()">清除</button>
-</div>
 <div id="loading" class="hide">處理中…</div>
 
 <!-- 首載進度條 -->
@@ -721,7 +700,6 @@ let hrPeople = [];
 let currentUser = { email: '', name: '', isAdmin: false, isWhitelisted: false, grantedTagIds: [] };
 let isAdminView = false;   // 視角切換（UI 用）；權限判定一律以後端真實身分為準
 let editableDocIds = new Set(); // V5：後端 _getEditableDocIds 計算的可編輯文件集
-let selectedForApproval = new Set(); // 批次核准：目前勾選中的 doc_id 集合（僅管理視角使用）
 let selectedDocId = null;
 let graphCache = null;
 
@@ -1321,95 +1299,29 @@ function currentFilteredDocs() {
 
 function renderTable() {
   const filtered = currentFilteredDocs();
-  const showApproveCol = currentUser.isAdmin && isAdminView;
-
-  const headRow = document.getElementById('docTableHeadRow');
-  headRow.innerHTML = (showApproveCol ? '<th style="width:36px"></th>' : '') +
-    '<th>文件編號</th><th>標題</th><th>類別</th><th>狀態</th><th>負責人</th><th>版本</th><th>下次審查</th>';
 
   const tbody = document.getElementById('docTableBody');
   tbody.innerHTML = '';
 
   if (filtered.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="${showApproveCol ? 8 : 7}" style="text-align:center;color:#6b7280;padding:32px">沒有符合條件的文件</td></tr>`;
-  } else {
-    filtered.forEach(d => {
-      const tr = document.createElement('tr');
-      if (d.doc_id === selectedDocId) tr.classList.add('active');
-      const checkCell = showApproveCol
-        ? `<td>${d.status === '審核中'
-            ? `<input type="checkbox" ${selectedForApproval.has(d.doc_id) ? 'checked' : ''} onclick="event.stopPropagation()" onchange="toggleApprovalCheckbox('${escapeHtml(d.doc_id)}', this.checked)">`
-            : ''}</td>`
-        : '';
-      tr.innerHTML = checkCell + `
-        <td class="doc-id">${escapeHtml(d.doc_id)}</td>
-        <td>${escapeHtml(d.title)}</td>
-        <td>${escapeHtml(d.category)}</td>
-        <td>${statusBadge(d.status)}</td>
-        <td>${escapeHtml(d.owner)}</td>
-        <td>${escapeHtml(d.version)}</td>
-        <td>${reviewCell(d)}</td>`;
-      tr.addEventListener('click', () => selectDoc(d.doc_id));
-      tbody.appendChild(tr);
-    });
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#6b7280;padding:32px">沒有符合條件的文件</td></tr>';
+    return;
   }
 
-  // 已勾選但目前已不可核准（篩選掉或狀態已變）的文件，從勾選集合移除
-  const stillSelectable = new Set(filtered.filter(d => d.status === '審核中').map(d => d.doc_id));
-  let changed = false;
-  selectedForApproval.forEach(id => {
-    if (!stillSelectable.has(id)) { selectedForApproval.delete(id); changed = true; }
+  filtered.forEach(d => {
+    const tr = document.createElement('tr');
+    if (d.doc_id === selectedDocId) tr.classList.add('active');
+    tr.innerHTML = `
+      <td class="doc-id">${escapeHtml(d.doc_id)}</td>
+      <td>${escapeHtml(d.title)}</td>
+      <td>${escapeHtml(d.category)}</td>
+      <td>${statusBadge(d.status)}</td>
+      <td>${escapeHtml(d.owner)}</td>
+      <td>${escapeHtml(d.version)}</td>
+      <td>${reviewCell(d)}</td>`;
+    tr.addEventListener('click', () => selectDoc(d.doc_id));
+    tbody.appendChild(tr);
   });
-  if (changed) renderApproveBar();
-}
-
-// 批次核准：勾選狀態切換
-function toggleApprovalCheckbox(docId, checked) {
-  if (checked) selectedForApproval.add(docId);
-  else selectedForApproval.delete(docId);
-  renderApproveBar();
-}
-
-// 依目前勾選數顯示/隱藏底部操作列
-function renderApproveBar() {
-  const bar = document.getElementById('approveBar');
-  const n = selectedForApproval.size;
-  document.getElementById('approveCount').textContent = `已勾選 ${n} 筆`;
-  bar.classList.toggle('show', n > 0);
-}
-
-// 清除全部勾選
-function clearApprovalSelection() {
-  selectedForApproval.clear();
-  renderTable();
-  renderApproveBar();
-}
-
-// 批次核准送出：二次確認 → 呼叫後端 → 依 approved/failed 組摘要 → 全量重載
-function batchApproveSelected() {
-  const ids = Array.from(selectedForApproval);
-  if (ids.length === 0) return;
-  if (!confirm(`確定要核准發布這 ${ids.length} 筆文件嗎？`)) return;
-
-  showLoading(true);
-  google.script.run
-    .withSuccessHandler(res => {
-      showLoading(false);
-      if (!res.success) { showToast('批次核准失敗：' + res.error); return; }
-      const okCount = res.approved.length;
-      const failCount = res.failed.length;
-      if (failCount === 0) {
-        showToast(`已核准發布 ${okCount} 筆`);
-      } else {
-        const failList = res.failed.map(f => `${f.doc_id}（${f.error}）`).join('、');
-        showToast(`${okCount} 筆成功，${failCount} 筆失敗：${failList}`);
-      }
-      selectedForApproval.clear();
-      renderApproveBar();
-      reloadDocs();
-    })
-    .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
-    .apiBatchApproveDocuments(ids);
 }
 
 function reviewCell(d) {
