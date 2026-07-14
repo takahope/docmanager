@@ -703,65 +703,61 @@
   </div>
 </div>
 
-<!-- 管理員批次匯入檔案 Modal -->
-<div class="modal fade" id="batchImportModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
-  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header bg-primary text-white">
-        <h5 class="modal-title"><i class="fas fa-file-import me-2"></i>管理員批次匯入正式檔案 (直接合位與發布)</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" id="btnCloseBatchImportModalTop" onclick="closeBatchImportModal()"></button>
+<!-- 管理員批次匯入檔案 Modal (遵循專案 House Pattern 架構) -->
+<div class="modal-backdrop" id="batchImportModal">
+  <div class="modal wide" style="width: min(1040px, 95vw); max-height: 90vh;">
+    <div class="modal-header">
+      <span id="batchImportModalTitle"><i class="fas fa-file-import me-1"></i> 管理員批次匯入正式檔案 (直接合位與發布)</span>
+      <button class="btn-x" id="btnCloseBatchImportModalTop" onclick="closeBatchImportModal()">✕</button>
+    </div>
+    <div class="modal-body" style="overflow-y: auto; max-height: 74vh;">
+      <div class="alert alert-info py-2 mb-3" style="font-size: 13px; background: #e0f2fe; border: 1px solid #bae6fd; padding: 10px; border-radius: 6px;">
+        <i class="fas fa-info-circle me-1"></i> 
+        系統將根據選取之檔案名稱自動提取 <code>doc_id</code>（例如 <code>TWHB-ISMS-002-001</code>）與版本號（例如 <code>V2.1</code>），配對成功的檔案將直接取代該文件之生效檔案並轉為「已發布」。
       </div>
-      <div class="modal-body">
-        <div class="alert alert-info py-2 mb-3">
-          <i class="fas fa-info-circle me-1"></i> 
-          系統將根據選取之 PDF 檔案名稱自動提取 <code>doc_id</code>（例如 <code>TWHB-ISMS-002-001</code>）與版本號（例如 <code>V2.1</code>），配對成功的檔案將直接取代該文件之生效檔案並轉為「已發布」。
-        </div>
 
-        <!-- 檔案選擇器 -->
-        <div class="mb-3">
-          <label for="batchImportFileInput" class="form-label fw-bold">選擇待匯入多檔案 (可多選 10~50 個檔)：</label>
-          <input class="form-control" type="file" id="batchImportFileInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx">
-        </div>
+      <!-- 檔案選擇器 -->
+      <div class="form-group mb-3">
+        <label for="batchImportFileInput" class="fw-bold mb-1">選擇待匯入多檔案 (可多選 10~50 個檔)：</label>
+        <input class="form-control" type="file" id="batchImportFileInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" onchange="parseAndMatchBatchFiles(this.files)">
+      </div>
 
-        <!-- 對應預覽清單 -->
-        <div class="table-responsive mb-3" style="max-height: 380px;">
-          <table class="table table-sm table-bordered table-hover align-middle mb-0">
-            <thead class="table-light sticky-top">
-              <tr>
-                <th style="width: 40px;" class="text-center"><input type="checkbox" id="chkSelectAllBatchItems" checked onclick="toggleSelectAllBatchItems(this)"></th>
-                <th>原始檔案名稱</th>
-                <th>大小</th>
-                <th>配對對應文件 (ID & 標題)</th>
-                <th style="width: 140px;">現狀態 ➔ 目標</th>
-                <th style="width: 110px;">生效版號</th>
-                <th style="width: 130px;" class="text-center">狀態 / 檢查</th>
-              </tr>
-            </thead>
-            <tbody id="batchImportPreviewTbody">
-              <tr>
-                <td colspan="7" class="text-center text-muted py-4">請點擊上方按鈕選擇檔案以產生配對預覽...</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+      <!-- 對應預覽清單 -->
+      <div class="table-scroll mb-3" style="max-height: 360px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          <thead style="background: var(--bg); position: sticky; top: 0; z-index: 2;">
+            <tr>
+              <th style="width: 40px; text-align: center; padding: 8px;"><input type="checkbox" id="chkSelectAllBatchItems" checked onclick="toggleSelectAllBatchItems(this)"></th>
+              <th style="padding: 8px;">原始檔案名稱</th>
+              <th style="padding: 8px;">大小</th>
+              <th style="padding: 8px;">配對對應文件 (ID & 標題)</th>
+              <th style="width: 140px; padding: 8px;">現狀態 ➔ 目標</th>
+              <th style="width: 110px; padding: 8px;">生效版號</th>
+              <th style="width: 130px; text-align: center; padding: 8px;">狀態 / 檢查</th>
+            </tr>
+          </thead>
+          <tbody id="batchImportPreviewTbody">
+            <tr>
+              <td colspan="7" class="text-center text-muted py-4" style="text-align: center; padding: 24px; color: #64748b;">請點擊上方按鈕選擇檔案以產生配對預覽...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-        <!-- 上傳進度條區塊 (初始隱藏) -->
-        <div id="batchImportProgressArea" style="display: none;" class="mt-3">
-          <div class="d-flex justify-content-between align-items-center mb-1">
-            <span id="batchImportProgressText" class="fw-bold text-primary">正在準備開始批次上傳...</span>
-            <span id="batchImportProgressPercent" class="badge bg-primary">0%</span>
-          </div>
-          <div class="progress" style="height: 20px;">
-            <div id="batchImportProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-primary" role="progressbar" style="width: 0%;"></div>
-          </div>
+      <!-- 上傳進度條區塊 (初始隱藏) -->
+      <div id="batchImportProgressArea" style="display: none; margin-top: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span id="batchImportProgressText" style="font-weight: bold; color: var(--primary);">正在準備開始批次上傳...</span>
+          <span id="batchImportProgressPercent" style="background: var(--primary); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 12px;">0%</span>
+        </div>
+        <div style="background: #e2e8f0; height: 16px; border-radius: 8px; overflow: hidden;">
+          <div id="batchImportProgressBar" style="background: var(--primary); height: 100%; width: 0%; transition: width 0.3s ease;"></div>
         </div>
       </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="btnCloseBatchImportModalBottom" onclick="closeBatchImportModal()">取消 / 關閉</button>
-        <button type="button" class="btn btn-primary fw-bold" id="btnStartBatchImportExecution" disabled onclick="startBatchImportExecution()">
-          <i class="fas fa-cloud-upload-alt me-1"></i> 確認並開始批次匯入
-        </button>
-      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" id="btnCloseBatchImportModalBottom" onclick="closeBatchImportModal()">取消 / 關閉</button>
+      <button type="button" class="btn-primary" id="btnStartBatchImportExecution" disabled onclick="startBatchImportExecution()">確認並開始批次匯入</button>
     </div>
   </div>
 </div>
@@ -1000,11 +996,10 @@ function renderUserInfo() {
   // 權限管理分頁：僅真實管理員（不受視角切換影響）可見
   document.getElementById('tabBtn-admin').style.display = currentUser.isAdmin ? '' : 'none';
 
-  // 批次匯入檔案按鈕：僅管理員可見
+  // 批次匯入檔案按鈕：僅管理員且處於管理視角時可見
   const btnBatchImport = document.getElementById('btnOpenBatchImport');
   if (btnBatchImport) {
-    const isAdminUser = (typeof state !== 'undefined' && state && state.user && state.user.isAdmin) || (typeof currentUser !== 'undefined' && currentUser && currentUser.isAdmin);
-    btnBatchImport.style.display = isAdminUser ? 'inline-block' : 'none';
+    btnBatchImport.style.display = (currentUser && currentUser.isAdmin && isAdminView) ? 'inline-block' : 'none';
   }
 }
 
@@ -1504,8 +1499,7 @@ function batchApproveSelected() {
 
 // 開啟批次匯入 Modal
 function openBatchImportModal() {
-  const isAdmin = (typeof state !== 'undefined' && state && state.user && state.user.isAdmin) || (typeof currentUser !== 'undefined' && currentUser && currentUser.isAdmin);
-  if (!isAdmin) {
+  if (!currentUser || !currentUser.isAdmin) {
     alert('僅限管理員執行此操作');
     return;
   }
@@ -1520,52 +1514,14 @@ function openBatchImportModal() {
 
   renderBatchImportPreviewTable();
 
-  // 綁定選取檔案監聽事件
-  if (fileInput && !fileInput.dataset.bound) {
-    fileInput.addEventListener('change', function(e) {
-      parseAndMatchBatchFiles(e.target.files || []);
-    });
-    fileInput.dataset.bound = 'true';
-  }
-
   const modalEl = document.getElementById('batchImportModal');
-  if (typeof bootstrap !== 'undefined') {
-    const modal = new bootstrap.Modal(modalEl);
-    modal.show();
-  } else if (modalEl) {
-    modalEl.style.display = 'block';
-    modalEl.classList.add('show');
-    let backdrop = document.getElementById('batchImportBackdrop');
-    if (!backdrop) {
-      backdrop = document.createElement('div');
-      backdrop.id = 'batchImportBackdrop';
-      backdrop.className = 'modal-backdrop show';
-      backdrop.style.zIndex = '1040';
-      document.body.appendChild(backdrop);
-    } else {
-      backdrop.classList.add('show');
-      backdrop.style.display = 'flex';
-    }
-    modalEl.style.zIndex = '1050';
-  }
+  if (modalEl) modalEl.classList.add('show');
 }
 
 // 關閉批次匯入 Modal
 function closeBatchImportModal() {
   const modalEl = document.getElementById('batchImportModal');
-  if (!modalEl) return;
-  if (typeof bootstrap !== 'undefined') {
-    const modal = bootstrap.Modal.getInstance(modalEl);
-    if (modal) modal.hide();
-  } else {
-    modalEl.style.display = 'none';
-    modalEl.classList.remove('show');
-    const backdrop = document.getElementById('batchImportBackdrop');
-    if (backdrop) {
-      backdrop.classList.remove('show');
-      backdrop.style.display = 'none';
-    }
-  }
+  if (modalEl) modalEl.classList.remove('show');
 }
 
 // 正則轉義工具
@@ -1587,7 +1543,7 @@ function parseAndMatchBatchFiles(fileList) {
     for (let d = 0; d < docs.length; d++) {
       const doc = docs[d];
       if (!doc || !doc.doc_id) continue;
-      const regex = new RegExp('^' + _escapeRegExpBatch(doc.doc_id) + '([_\\-\\s]|$)', 'i');
+      const regex = new RegExp('^' + _escapeRegExpBatch(String(doc.doc_id).trim()) + '([_\\-\\s]|$)', 'i');
       if (regex.test(name)) {
         matchedDoc = doc;
         break;
