@@ -709,7 +709,7 @@
     <div class="modal-content">
       <div class="modal-header bg-primary text-white">
         <h5 class="modal-title"><i class="fas fa-file-import me-2"></i>管理員批次匯入正式檔案 (直接合位與發布)</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" id="btnCloseBatchImportModalTop"></button>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" id="btnCloseBatchImportModalTop" onclick="closeBatchImportModal()"></button>
       </div>
       <div class="modal-body">
         <div class="alert alert-info py-2 mb-3">
@@ -757,7 +757,7 @@
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="btnCloseBatchImportModalBottom">取消 / 關閉</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="btnCloseBatchImportModalBottom" onclick="closeBatchImportModal()">取消 / 關閉</button>
         <button type="button" class="btn btn-primary fw-bold" id="btnStartBatchImportExecution" disabled onclick="startBatchImportExecution()">
           <i class="fas fa-cloud-upload-alt me-1"></i> 確認並開始批次匯入
         </button>
@@ -797,6 +797,7 @@ let currentUser = { email: '', name: '', isAdmin: false, isWhitelisted: false, g
 let isAdminView = false;   // 視角切換（UI 用）；權限判定一律以後端真實身分為準
 let editableDocIds = new Set(); // V5：後端 _getEditableDocIds 計算的可編輯文件集
 let selectedForApproval = new Set(); // 批次核准：目前勾選中的 doc_id 集合（僅管理視角使用）
+let batchImportItems = []; // 儲存批次匯入配對佇列與狀態
 let selectedDocId = null;
 let graphCache = null;
 
@@ -1495,6 +1496,221 @@ function batchApproveSelected() {
     })
     .withFailureHandler(err => { showLoading(false); showToast('錯誤：' + err.message); })
     .apiBatchApproveDocuments(ids);
+}
+
+// ============================================================
+// 管理員批次匯入多檔案 (直接合位與發布) - 前端智能解析與預覽
+// ============================================================
+
+// 開啟批次匯入 Modal
+function openBatchImportModal() {
+  const isAdmin = (typeof state !== 'undefined' && state && state.user && state.user.isAdmin) || (typeof currentUser !== 'undefined' && currentUser && currentUser.isAdmin);
+  if (!isAdmin) {
+    alert('僅限管理員執行此操作');
+    return;
+  }
+  batchImportItems = [];
+  if (typeof window !== 'undefined') window.batchImportItems = batchImportItems;
+  const fileInput = document.getElementById('batchImportFileInput');
+  if (fileInput) fileInput.value = '';
+  const progressArea = document.getElementById('batchImportProgressArea');
+  if (progressArea) progressArea.style.display = 'none';
+  const btnStart = document.getElementById('btnStartBatchImportExecution');
+  if (btnStart) btnStart.disabled = true;
+
+  renderBatchImportPreviewTable();
+
+  // 綁定選取檔案監聽事件
+  if (fileInput && !fileInput.dataset.bound) {
+    fileInput.addEventListener('change', function(e) {
+      parseAndMatchBatchFiles(e.target.files || []);
+    });
+    fileInput.dataset.bound = 'true';
+  }
+
+  const modalEl = document.getElementById('batchImportModal');
+  if (typeof bootstrap !== 'undefined') {
+    const modal = new bootstrap.Modal(modalEl);
+    modal.show();
+  } else if (modalEl) {
+    modalEl.style.display = 'block';
+    modalEl.classList.add('show');
+    let backdrop = document.getElementById('batchImportBackdrop');
+    if (!backdrop) {
+      backdrop = document.createElement('div');
+      backdrop.id = 'batchImportBackdrop';
+      backdrop.className = 'modal-backdrop show';
+      backdrop.style.zIndex = '1040';
+      document.body.appendChild(backdrop);
+    } else {
+      backdrop.classList.add('show');
+      backdrop.style.display = 'flex';
+    }
+    modalEl.style.zIndex = '1050';
+  }
+}
+
+// 關閉批次匯入 Modal
+function closeBatchImportModal() {
+  const modalEl = document.getElementById('batchImportModal');
+  if (!modalEl) return;
+  if (typeof bootstrap !== 'undefined') {
+    const modal = bootstrap.Modal.getInstance(modalEl);
+    if (modal) modal.hide();
+  } else {
+    modalEl.style.display = 'none';
+    modalEl.classList.remove('show');
+    const backdrop = document.getElementById('batchImportBackdrop');
+    if (backdrop) {
+      backdrop.classList.remove('show');
+      backdrop.style.display = 'none';
+    }
+  }
+}
+
+// 正則轉義工具
+function _escapeRegExpBatch(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// 解析多檔案與配對 logic
+function parseAndMatchBatchFiles(fileList) {
+  batchImportItems = [];
+  const docs = (typeof state !== 'undefined' && state && (state.allDocs || state.docs)) || (typeof allDocs !== 'undefined' && allDocs) || [];
+
+  for (let i = 0; i < fileList.length; i++) {
+    const file = fileList[i];
+    const name = file.name;
+    let matchedDoc = null;
+
+    // 依據 doc_id 進行匹配：尋找以 doc_id 開頭且後面跟隨 _ / - / 空格的對象
+    for (let d = 0; d < docs.length; d++) {
+      const doc = docs[d];
+      if (!doc || !doc.doc_id) continue;
+      const regex = new RegExp('^' + _escapeRegExpBatch(doc.doc_id) + '([_\\-\\s]|$)', 'i');
+      if (regex.test(name)) {
+        matchedDoc = doc;
+        break;
+      }
+    }
+
+    // 解析提取版本號 (例如 V2.1)
+    let extractedVersion = '';
+    const verMatch = name.match(/[_-\s][vV]([0-9]+(?:\.[0-9]+)*)(?:[_-\s][^.]+)?\.[^.]+$/i);
+    if (verMatch && verMatch[1]) {
+      extractedVersion = verMatch[1];
+    } else if (matchedDoc) {
+      extractedVersion = matchedDoc.version || '1.0';
+    } else {
+      extractedVersion = '1.0';
+    }
+
+    // 檢查檔案大小是否大於 20MB
+    const isOverSize = file.size > 20 * 1024 * 1024;
+    let status = 'matched';
+    let statusText = '✔ 完全對應';
+    let badgeClass = 'bg-success';
+
+    if (isOverSize) {
+      status = 'error_size';
+      statusText = '✘ 超過 20MB';
+      badgeClass = 'bg-danger';
+    } else if (!matchedDoc) {
+      status = 'unmatched';
+      statusText = '✘ 找不到文件 ID';
+      badgeClass = 'bg-danger';
+    }
+
+    batchImportItems.push({
+      id: 'batch_item_' + i,
+      file: file,
+      matchedDoc: matchedDoc,
+      targetVersion: extractedVersion,
+      status: status,
+      statusText: statusText,
+      badgeClass: badgeClass,
+      selected: (status === 'matched')
+    });
+  }
+
+  if (typeof window !== 'undefined') window.batchImportItems = batchImportItems;
+  renderBatchImportPreviewTable();
+}
+
+// 渲染預覽表格
+function renderBatchImportPreviewTable() {
+  const tbody = document.getElementById('batchImportPreviewTbody');
+  const btnStart = document.getElementById('btnStartBatchImportExecution');
+  if (!tbody) return;
+
+  if (batchImportItems.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-4">請點擊上方按鈕選擇檔案以產生配對預覽...</td></tr>`;
+    if (btnStart) btnStart.disabled = true;
+    return;
+  }
+
+  let html = '';
+  let selectableCount = 0;
+
+  batchImportItems.forEach((item, idx) => {
+    const fileSizeMB = (item.file.size / (1024 * 1024)).toFixed(2) + ' MB';
+    const docInfo = item.matchedDoc
+      ? `<strong>${escapeHtml(item.matchedDoc.doc_id)}</strong> <span class="text-muted">(${escapeHtml(item.matchedDoc.title || '無標題')})</span>`
+      : `<span class="text-danger">未找到吻合的 doc_id</span>`;
+    const statusFlow = item.matchedDoc
+      ? `<span class="badge bg-secondary">${escapeHtml(item.matchedDoc.status)}</span> ➔ <span class="badge bg-success">已發布</span>`
+      : `—`;
+
+    const isSelectable = (item.status === 'matched');
+    if (isSelectable && item.selected) selectableCount++;
+
+    html += `
+      <tr class="${item.selected && isSelectable ? 'table-active' : ''}" id="tr_${item.id}">
+        <td class="text-center">
+          <input type="checkbox" class="form-check-input batch-chk-item" data-idx="${idx}" ${item.selected ? 'checked' : ''} ${isSelectable ? '' : 'disabled'} onchange="onBatchItemCheckChanged(${idx}, this.checked)">
+        </td>
+        <td><span class="text-break" title="${escapeHtml(item.file.name)}">${escapeHtml(item.file.name)}</span></td>
+        <td class="text-nowrap">${fileSizeMB}</td>
+        <td>${docInfo}</td>
+        <td class="text-nowrap">${statusFlow}</td>
+        <td>
+          <input type="text" class="form-control form-control-sm text-center fw-bold" value="${escapeHtml(item.targetVersion)}" ${isSelectable ? '' : 'disabled'} onchange="onBatchItemVersionChanged(${idx}, this.value)">
+        </td>
+        <td class="text-center">
+          <span class="badge ${item.badgeClass} w-100 py-1" id="badge_${item.id}">${item.statusText}</span>
+        </td>
+      </tr>
+    `;
+  });
+
+  tbody.innerHTML = html;
+  if (btnStart) btnStart.disabled = (selectableCount === 0);
+}
+
+// 單列 Checkbox 變更
+function onBatchItemCheckChanged(idx, checked) {
+  if (batchImportItems[idx] && batchImportItems[idx].status === 'matched') {
+    batchImportItems[idx].selected = checked;
+  }
+  const anySelected = batchImportItems.some(item => item.selected && item.status === 'matched');
+  const btnStart = document.getElementById('btnStartBatchImportExecution');
+  if (btnStart) btnStart.disabled = !anySelected;
+}
+
+// 全選 Checkbox 切換
+function toggleSelectAllBatchItems(masterChk) {
+  const checked = masterChk.checked;
+  batchImportItems.forEach((item, idx) => {
+    if (item.status === 'matched') item.selected = checked;
+  });
+  renderBatchImportPreviewTable();
+}
+
+// 版號文字修改
+function onBatchItemVersionChanged(idx, newVer) {
+  if (batchImportItems[idx]) {
+    batchImportItems[idx].targetVersion = (newVer || '1.0').trim();
+  }
 }
 
 function reviewCell(d) {
