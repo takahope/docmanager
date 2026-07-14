@@ -1713,6 +1713,149 @@ function onBatchItemVersionChanged(idx, newVer) {
   }
 }
 
+// 將 File 物件包裝為 Base64 Promise
+function _readFileAsBase64Promise(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const dataUrl = e.target.result || '';
+      const base64 = dataUrl.split(',')[1] || '';
+      resolve(base64);
+    };
+    reader.onerror = function(err) {
+      reject(err || new Error('檔案讀取失敗'));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// 循序執行批次匯入上傳
+async function startBatchImportExecution() {
+  const selectedItems = batchImportItems.filter(item => item.selected && item.status === 'matched');
+  if (selectedItems.length === 0) {
+    alert('未選擇任何有效的待上傳對應檔案');
+    return;
+  }
+
+  if (!confirm(`確定要批次匯入這 ${selectedItems.length} 份正式檔案嗎？\n匯入後對應文件將直接更新為新版號並轉為「已發布」狀態。`)) {
+    return;
+  }
+
+  // UI 鎖定
+  const btnStart = document.getElementById('btnStartBatchImportExecution');
+  const btnCloseTop = document.getElementById('btnCloseBatchImportModalTop');
+  const btnCloseBottom = document.getElementById('btnCloseBatchImportModalBottom');
+  const fileInput = document.getElementById('batchImportFileInput');
+  const progressArea = document.getElementById('batchImportProgressArea');
+  const progressText = document.getElementById('batchImportProgressText');
+  const progressBar = document.getElementById('batchImportProgressBar');
+  const progressPercent = document.getElementById('batchImportProgressPercent');
+
+  if (btnStart) btnStart.disabled = true;
+  if (btnCloseTop) btnCloseTop.disabled = true;
+  if (btnCloseBottom) btnCloseBottom.disabled = true;
+  if (fileInput) fileInput.disabled = true;
+  if (progressArea) progressArea.style.display = 'block';
+
+  // 將表格 Checkbox 及版號輸入框禁用
+  document.querySelectorAll('.batch-chk-item, #chkSelectAllBatchItems, .batch-ver-input').forEach(el => el.disabled = true);
+
+  let successCount = 0;
+  let failCount = 0;
+  const total = selectedItems.length;
+
+  for (let i = 0; i < total; i++) {
+    const item = selectedItems[i];
+    const currentNum = i + 1;
+    const percent = Math.round((i / total) * 100);
+
+    // 更新進度條 UI
+    if (progressText) progressText.textContent = `⏳ 正在上傳第 ${currentNum} / ${total} 筆：${item.file.name}...`;
+    if (progressBar) progressBar.style.width = percent + '%';
+    if (progressPercent) progressPercent.textContent = percent + '%';
+
+    // 更新該行表格狀態
+    const badgeEl = document.getElementById('badge_' + item.id);
+    if (badgeEl) {
+      badgeEl.className = 'badge bg-warning text-dark w-100 py-1';
+      badgeEl.textContent = '⏳ 上傳中...';
+    }
+
+    try {
+      // 1. 讀取 Base64
+      const base64 = await _readFileAsBase64Promise(item.file);
+      const mimeType = item.file.type || 'application/octet-stream';
+
+      // 2. 呼叫後端 API
+      const res = await new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(res => resolve(res))
+          .withFailureHandler(err => reject(err))
+          .apiBatchImportDirectFile(item.matchedDoc.doc_id, item.file.name, base64, mimeType, item.targetVersion);
+      });
+
+      if (res && res.success) {
+        successCount++;
+        item.status = 'uploaded';
+        if (badgeEl) {
+          badgeEl.className = 'badge bg-success w-100 py-1';
+          badgeEl.textContent = `✔ 生效 v${res.version}`;
+        }
+        // 更新本地 state 快取，使其在背景即時反映
+        if (item.matchedDoc) {
+          item.matchedDoc.status = '已發布';
+          item.matchedDoc.version = res.version;
+          item.matchedDoc.file_id = res.file_id;
+          item.matchedDoc.pending_file_id = '';
+          item.matchedDoc.pending_version = '';
+          item.matchedDoc.pending_file_name = '';
+        }
+      } else {
+        failCount++;
+        item.status = 'failed';
+        const errMsg = (res && res.error) ? res.error : '未知錯誤';
+        if (badgeEl) {
+          badgeEl.className = 'badge bg-danger w-100 py-1';
+          badgeEl.textContent = `❌ 失敗: ${errMsg}`;
+        }
+      }
+    } catch (err) {
+      failCount++;
+      item.status = 'failed';
+      if (badgeEl) {
+        badgeEl.className = 'badge bg-danger w-100 py-1';
+        badgeEl.textContent = `❌ 失敗: ${err.message || '網路異常'}`;
+      }
+    }
+  }
+
+  // 全部處理完畢，更新進度條為 100%
+  if (progressText) progressText.textContent = `🎉 批次處理結束！成功：${successCount} 筆，失敗：${failCount} 筆。`;
+  if (progressBar) {
+    progressBar.style.width = '100%';
+    progressBar.classList.remove('progress-bar-animated');
+    if (failCount > 0 && successCount === 0) progressBar.className = 'progress-bar bg-danger';
+    else if (failCount > 0) progressBar.className = 'progress-bar bg-warning';
+    else progressBar.className = 'progress-bar bg-success';
+  }
+  if (progressPercent) progressPercent.textContent = '100%';
+
+  // 恢復關閉按鈕並提示
+  if (btnCloseTop) btnCloseTop.disabled = false;
+  if (btnCloseBottom) {
+    btnCloseBottom.disabled = false;
+    btnCloseBottom.className = 'btn btn-primary fw-bold';
+    btnCloseBottom.textContent = '完成 / 關閉';
+  }
+  if (fileInput) fileInput.disabled = false;
+
+  alert(`批次匯入處理完畢！\n成功：${successCount} 筆\n失敗：${failCount} 筆`);
+
+  // 重新渲染背景列表畫面
+  if (typeof renderDocList === 'function') renderDocList();
+  if (typeof renderStats === 'function') renderStats();
+}
+
 function reviewCell(d) {
   if (d.status !== '已發布' || !d.next_review) return '<span style="color:#d1d5db">—</span>';
   const n = daysUntil(d.next_review);
