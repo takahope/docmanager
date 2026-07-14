@@ -332,6 +332,70 @@ function apiUploadDocFile(docId, fileName, base64, mimeType, bumpType, customVer
   }
 }
 
+// 管理員批次匯入直接生效之單檔處理 API
+// 不經過 _bumpVersion 與待核欄位，直接寫入 file_id / version / published_at，並將狀態設定為「已發布」
+function apiBatchImportDirectFile(docId, fileName, base64, mimeType, targetVersion) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const ctx = _assertAdmin();
+    const oldDoc = _readDocs().find(d => d.doc_id === docId);
+    if (!oldDoc) return { success: false, error: '找不到文件：' + docId };
+    if (oldDoc.status === '已廢止') {
+      return { success: false, error: '已廢止文件不可批次匯入檔案' };
+    }
+    if (!base64) return { success: false, error: '未提供檔案內容' };
+
+    const safeName = _sanitizeFileName(fileName);
+    const ver = String(targetVersion || oldDoc.version || '1.0').trim();
+
+    // 解碼 Base64 並存入 Google Drive
+    const bytes = Utilities.base64Decode(base64);
+    const blob = Utilities.newBlob(bytes, mimeType || 'application/octet-stream',
+      `${docId}_v${ver}_${safeName}`);
+    const folder = _getOrCreateDocFolder(docId);
+    const file = folder.createFile(blob);
+
+    const sheet = _getSheet(SHEET_NAMES.DOCS);
+    const rows = sheet.getDataRange().getDisplayValues();
+    const idx = rows.findIndex(r => r[DOC_COL.DOC_ID] === docId);
+    if (idx < 1) return { success: false, error: '找不到試算表列：' + docId };
+
+    // 準備新版資料，以 oldDoc 為基礎覆寫
+    const newStatus = '已發布';
+    const cycle = parseInt(oldDoc.review_cycle, 10) || DEFAULT_REVIEW_CYCLE;
+    const pubDate = (oldDoc.status !== '已發布' || !oldDoc.published_at) ? _now() : oldDoc.published_at;
+    const nextRev = (oldDoc.status !== '已發布' || !oldDoc.next_review) ? _addMonthsFromToday(cycle) : oldDoc.next_review;
+
+    const merged = Object.assign({}, oldDoc, {
+      status: newStatus,
+      version: ver,
+      published_at: pubDate,
+      next_review: nextRev,
+      file_id: file.getId(),
+      pending_file_id: '',
+      pending_version: '',
+      pending_file_name: '',
+    });
+
+    sheet.getRange(idx + 1, 1, 1, DOC_COL_COUNT).setValues([_docToRow(merged)]);
+
+    // 登記至「檔案版本」表
+    const fileVerSheet = _getSheet(SHEET_NAMES.FILE_VERSIONS);
+    fileVerSheet.appendRow([docId, ver, file.getId(), safeName, _getCurrentEmail(), _nowWithTime()]);
+
+    // 記錄異動審計
+    _logAudit('批次匯入', docId, ver, `管理員批次初始化/直接合位正式檔案「${safeName}」（生效為 v${ver}）`);
+
+    SpreadsheetApp.flush();
+    return { success: true, docId: docId, version: ver, status: newStatus, file_id: file.getId() };
+  } catch (e) {
+    return { success: false, error: String(e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // 更新文件（依 doc_id 定位列，整列寫回）
 // 狀態變更走 STATUS_TRANSITIONS 查表驗證；轉「已發布」自動填發布日與下次審查日。
 function apiUpdateDoc(doc) {
