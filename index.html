@@ -1851,9 +1851,10 @@ async function startBatchImportExecution() {
 
   alert(`批次匯入處理完畢！\n成功：${successCount} 筆\n失敗：${failCount} 筆`);
 
-  // 重新渲染背景列表畫面
-  if (typeof renderDocList === 'function') renderDocList();
-  if (typeof renderStats === 'function') renderStats();
+  // 重新渲染背景列表與儀表板，並同步重新載入最新資料
+  if (typeof renderTable === 'function') renderTable();
+  if (typeof renderDashboard === 'function') renderDashboard();
+  if (typeof reloadDocs === 'function') reloadDocs();
 }
 
 function reviewCell(d) {

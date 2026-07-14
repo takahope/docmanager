@@ -349,17 +349,21 @@ function apiBatchImportDirectFile(docId, fileName, base64, mimeType, targetVersi
     const safeName = _sanitizeFileName(fileName);
     const ver = String(targetVersion || oldDoc.version || '1.0').trim();
 
+    const sheet = _getSheet(SHEET_NAMES.DOCS);
+    const rows = sheet.getDataRange().getDisplayValues();
+    const idx = rows.findIndex(r => r[DOC_COL.DOC_ID] === docId);
+    if (idx < 1) return { success: false, error: '找不到試算表列：' + docId };
+
+    if (oldDoc.pending_file_id) {
+      try { DriveApp.getFileById(oldDoc.pending_file_id).setTrashed(true); } catch (e) { /* 忽略已不存在的情況 */ }
+    }
+
     // 解碼 Base64 並存入 Google Drive
     const bytes = Utilities.base64Decode(base64);
     const blob = Utilities.newBlob(bytes, mimeType || 'application/octet-stream',
       `${docId}_v${ver}_${safeName}`);
     const folder = _getOrCreateDocFolder(docId);
     const file = folder.createFile(blob);
-
-    const sheet = _getSheet(SHEET_NAMES.DOCS);
-    const rows = sheet.getDataRange().getDisplayValues();
-    const idx = rows.findIndex(r => r[DOC_COL.DOC_ID] === docId);
-    if (idx < 1) return { success: false, error: '找不到試算表列：' + docId };
 
     // 準備新版資料，以 oldDoc 為基礎覆寫
     const newStatus = '已發布';
