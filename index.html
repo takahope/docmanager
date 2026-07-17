@@ -144,6 +144,12 @@
   tbody tr:hover { background: #f0f4f8; }
   tbody tr.active { background: #e3edf7; }
 
+  /* ── 確保全站頁面文字皆可拖曳選取複製 ── */
+  body, table, td, th, .card, .rel-item, .hist-item, .detail-meta dd, .folder-node, .stat-card {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
   .badge {
     display: inline-block; padding: 3px 10px; border-radius: 999px;
     font-size: 12px; font-weight: 600; white-space: nowrap;
@@ -827,6 +833,34 @@ let modalSnapshots = {};
 
 // 注音輸入法防護：組字期間不觸發搜尋
 let isComposing = false;
+
+// ============================================================
+// 全域捕獲階段選取防護 (Global Selection Guard)
+// ============================================================
+let isDraggingSelection = false;
+let mouseDownSelText = '';
+window.addEventListener('mousedown', function() {
+  const sel = window.getSelection();
+  mouseDownSelText = sel ? sel.toString().trim() : '';
+  isDraggingSelection = false;
+}, true);
+window.addEventListener('mousemove', function() {
+  const sel = window.getSelection();
+  if (sel && sel.toString().trim() !== mouseDownSelText) {
+    isDraggingSelection = true;
+  }
+}, true);
+window.addEventListener('click', function(e) {
+  const sel = window.getSelection();
+  const currentSelText = sel ? sel.toString().trim() : '';
+  // 若點擊瞬間或拖曳/雙擊操作中產生了文字選取，在 capture 階段阻斷點擊事件向下傳遞 (避免觸發 tr/卡片點擊與重繪)
+  if (currentSelText.length > 0 && (isDraggingSelection || currentSelText !== mouseDownSelText)) {
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') {
+      e.stopPropagation();
+    }
+  }
+}, true);
 
 // ── 工具 ──────────────────────────────────────────────────
 function escapeHtml(str) {
