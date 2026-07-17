@@ -722,6 +722,14 @@
         <input class="form-control" type="file" id="batchImportFileInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" onchange="parseAndMatchBatchFiles(this.files)">
       </div>
 
+      <!-- 對應預覽清單上方：重複 ID 警告區塊 -->
+      <div id="batchImportDuplicateAlert" class="alert alert-danger py-2 mb-3" style="display: none; font-size: 13px; background: #fef2f2; border: 1px solid #f87171; color: #991b1b; border-radius: 6px;">
+        <div class="d-flex align-items-center">
+          <i class="fas fa-exclamation-triangle me-2 fs-5"></i>
+          <span id="batchImportDuplicateAlertText"></span>
+        </div>
+      </div>
+
       <!-- 對應預覽清單 -->
       <div class="table-scroll mb-3" style="max-height: 360px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px;">
         <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
@@ -1589,6 +1597,32 @@ function parseAndMatchBatchFiles(fileList) {
     });
   }
 
+  // 掃描全體 batchImportItems，找出重複的 doc_id 群組
+  const docIdCounts = {};
+  batchImportItems.forEach(item => {
+    if (item.status === 'matched' && item.matchedDoc && item.matchedDoc.doc_id) {
+      const dId = item.matchedDoc.doc_id;
+      docIdCounts[dId] = (docIdCounts[dId] || 0) + 1;
+    }
+  });
+
+  // 標識重複項目與初始防呆勾選行為
+  batchImportItems.forEach(item => {
+    if (item.status === 'matched' && item.matchedDoc && item.matchedDoc.doc_id) {
+      const dId = item.matchedDoc.doc_id;
+      if (docIdCounts[dId] > 1) {
+        item.isDuplicateGroup = true;
+        item.duplicateCount = docIdCounts[dId];
+        // 遇到重複 ID 群組，預設不勾選，要求管理員確認並單選一筆
+        item.selected = false;
+        item.statusText = `⚠ ID重複(${docIdCounts[dId]}份互斥)`;
+        item.badgeClass = 'bg-warning text-dark';
+      } else {
+        item.isDuplicateGroup = false;
+      }
+    }
+  });
+
   if (typeof window !== 'undefined') window.batchImportItems = batchImportItems;
   renderBatchImportPreviewTable();
 }
@@ -1597,31 +1631,80 @@ function parseAndMatchBatchFiles(fileList) {
 function renderBatchImportPreviewTable() {
   const tbody = document.getElementById('batchImportPreviewTbody');
   const btnStart = document.getElementById('btnStartBatchImportExecution');
+  const alertEl = document.getElementById('batchImportDuplicateAlert');
+  const alertTextEl = document.getElementById('batchImportDuplicateAlertText');
   if (!tbody) return;
 
   if (batchImportItems.length === 0) {
     tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-4">請點擊上方按鈕選擇檔案以產生配對預覽...</td></tr>`;
     if (btnStart) btnStart.disabled = true;
+    if (alertEl) alertEl.style.display = 'none';
     return;
   }
+
+  // 檢查選中的對應項目中是否有 ID 重複
+  const selectedDocIds = {};
+  let hasSelectedDuplicates = false;
+  let totalDuplicatesInList = 0;
+  const duplicateIdSet = new Set();
+
+  batchImportItems.forEach(item => {
+    if (item.isDuplicateGroup && item.matchedDoc) {
+      duplicateIdSet.add(item.matchedDoc.doc_id);
+    }
+    if (item.selected && item.status === 'matched' && item.matchedDoc) {
+      const dId = item.matchedDoc.doc_id;
+      selectedDocIds[dId] = (selectedDocIds[dId] || 0) + 1;
+      if (selectedDocIds[dId] > 1) hasSelectedDuplicates = true;
+    }
+  });
+  totalDuplicatesInList = duplicateIdSet.size;
 
   let html = '';
   let selectableCount = 0;
 
   batchImportItems.forEach((item, idx) => {
     const fileSizeMB = (item.file.size / (1024 * 1024)).toFixed(2) + ' MB';
+    const isSelectable = (item.status === 'matched');
+    if (isSelectable && item.selected) selectableCount++;
+
+    // 動態判斷狀態樣式與重複警告
+    let rowBadgeClass = item.badgeClass;
+    let rowStatusText = item.statusText;
+    let rowStyle = '';
+
+    if (item.isDuplicateGroup && item.matchedDoc) {
+      const dId = item.matchedDoc.doc_id;
+      const isThisSelected = item.selected;
+      const selectedCountForThisId = selectedDocIds[dId] || 0;
+
+      if (isThisSelected && selectedCountForThisId > 1) {
+        // 同 ID 有 2 筆以上同時被勾選：嚴重阻擋狀態
+        rowBadgeClass = 'bg-danger';
+        rowStatusText = '❌ 勾選衝突(禁止送出)';
+        rowStyle = 'background-color: #fef2f2; font-weight: 600;';
+      } else if (isThisSelected && selectedCountForThisId === 1) {
+        // 該群組目前僅勾選此筆：去重成功
+        rowBadgeClass = 'bg-success';
+        rowStatusText = '✔ 已單選去重';
+        rowStyle = 'background-color: #f0fdf4;';
+      } else {
+        // 該群組未勾選此筆
+        rowBadgeClass = 'bg-secondary';
+        rowStatusText = `⚠ ID重複(未選)`;
+        rowStyle = 'background-color: #fff8f1;';
+      }
+    }
+
     const docInfo = item.matchedDoc
-      ? `<strong>${escapeHtml(item.matchedDoc.doc_id)}</strong> <span class="text-muted">(${escapeHtml(item.matchedDoc.title || '無標題')})</span>`
+      ? `<strong>${escapeHtml(item.matchedDoc.doc_id)}</strong> <span class="text-muted">(${escapeHtml(item.matchedDoc.title || '無標題')})</span> ${item.isDuplicateGroup ? '<span class="badge bg-warning text-dark ms-1" style="font-size:11px;">同ID重複</span>' : ''}`
       : `<span class="text-danger">未找到吻合的 doc_id</span>`;
     const statusFlow = item.matchedDoc
       ? `<span class="badge bg-secondary">${escapeHtml(item.matchedDoc.status)}</span> ➔ <span class="badge bg-success">已發布</span>`
       : `—`;
 
-    const isSelectable = (item.status === 'matched');
-    if (isSelectable && item.selected) selectableCount++;
-
     html += `
-      <tr class="${item.selected && isSelectable ? 'table-active' : ''}" id="tr_${item.id}">
+      <tr class="${item.selected && isSelectable ? 'table-active' : ''}" id="tr_${item.id}" style="${rowStyle}">
         <td class="text-center">
           <input type="checkbox" class="form-check-input batch-chk-item" data-idx="${idx}" ${item.selected ? 'checked' : ''} ${isSelectable ? '' : 'disabled'} onchange="onBatchItemCheckChanged(${idx}, this.checked)">
         </td>
@@ -1633,31 +1716,83 @@ function renderBatchImportPreviewTable() {
           <input type="text" class="form-control form-control-sm text-center fw-bold" value="${escapeHtml(item.targetVersion)}" ${isSelectable ? '' : 'disabled'} onchange="onBatchItemVersionChanged(${idx}, this.value)">
         </td>
         <td class="text-center">
-          <span class="badge ${item.badgeClass} w-100 py-1" id="badge_${item.id}">${item.statusText}</span>
+          <span class="badge ${rowBadgeClass} w-100 py-1" id="badge_${item.id}">${rowStatusText}</span>
         </td>
       </tr>
     `;
   });
 
   tbody.innerHTML = html;
-  if (btnStart) btnStart.disabled = (selectableCount === 0);
+
+  // 警告提示與按鈕防呆鎖定
+  if (hasSelectedDuplicates) {
+    if (alertEl && alertTextEl) {
+      alertEl.style.display = 'block';
+      alertEl.className = 'alert alert-danger py-2 mb-3';
+      alertEl.style.background = '#fef2f2';
+      alertEl.style.borderColor = '#f87171';
+      alertEl.style.color = '#991b1b';
+      alertTextEl.innerHTML = `<strong>⚠ 勾選衝突錯誤：</strong> 目前勾選的項目中存在有重複的 <code>doc_id</code>，同次批次匯入一個 ID 僅允許送出一份正式檔案！請取消多餘的勾選。`;
+    }
+    if (btnStart) btnStart.disabled = true; // ★ 核心要求：有重覆的就不能送出
+  } else if (totalDuplicatesInList > 0) {
+    if (alertEl && alertTextEl) {
+      alertEl.style.display = 'block';
+      alertEl.className = 'alert alert-warning py-2 mb-3';
+      alertEl.style.background = '#fffbeb';
+      alertEl.style.borderColor = '#fde68a';
+      alertEl.style.color = '#92400e';
+      alertTextEl.innerHTML = `<strong>💡 偵測到有 ${totalDuplicatesInList} 組文件 ID 存在多份檔案：</strong> 系統已自動互斥去重。您可以勾選單列以切換欲上傳的目標檔案，每個 ID 最多只能勾選一筆。`;
+    }
+    if (btnStart) btnStart.disabled = (selectableCount === 0);
+  } else {
+    if (alertEl) alertEl.style.display = 'none';
+    if (btnStart) btnStart.disabled = (selectableCount === 0);
+  }
 }
 
 // 單列 Checkbox 變更
 function onBatchItemCheckChanged(idx, checked) {
   if (batchImportItems[idx] && batchImportItems[idx].status === 'matched') {
     batchImportItems[idx].selected = checked;
+
+    // ★ 互斥去重核心：當此項目為勾選，且屬於重複 ID 群組時，自動將同 doc_id 的其他項目取消勾選
+    if (checked && batchImportItems[idx].isDuplicateGroup && batchImportItems[idx].matchedDoc) {
+      const targetDocId = batchImportItems[idx].matchedDoc.doc_id;
+      batchImportItems.forEach((item, oIdx) => {
+        if (oIdx !== idx && item.matchedDoc && item.matchedDoc.doc_id === targetDocId) {
+          item.selected = false;
+        }
+      });
+    }
   }
-  const anySelected = batchImportItems.some(item => item.selected && item.status === 'matched');
-  const btnStart = document.getElementById('btnStartBatchImportExecution');
-  if (btnStart) btnStart.disabled = !anySelected;
+  renderBatchImportPreviewTable();
 }
 
 // 全選 Checkbox 切換
 function toggleSelectAllBatchItems(masterChk) {
   const checked = masterChk.checked;
+  const seenDocIds = new Set();
+
   batchImportItems.forEach((item, idx) => {
-    if (item.status === 'matched') item.selected = checked;
+    if (item.status === 'matched') {
+      if (!checked) {
+        item.selected = false;
+      } else {
+        // 如果勾選全選，若是重複群組，僅允許該 ID 順位第 1 個被勾選，其餘設為 false，避免觸發衝突
+        if (item.isDuplicateGroup && item.matchedDoc) {
+          const dId = item.matchedDoc.doc_id;
+          if (!seenDocIds.has(dId)) {
+            seenDocIds.add(dId);
+            item.selected = true;
+          } else {
+            item.selected = false;
+          }
+        } else {
+          item.selected = true;
+        }
+      }
+    }
   });
   renderBatchImportPreviewTable();
 }
@@ -1690,6 +1825,14 @@ async function startBatchImportExecution() {
   const selectedItems = batchImportItems.filter(item => item.selected && item.status === 'matched');
   if (selectedItems.length === 0) {
     alert('未選擇任何有效的待上傳對應檔案');
+    return;
+  }
+
+  // ★ 最終阻擋檢查：驗證勾選項目中是否有相同的 doc_id
+  const docIdsInQueue = selectedItems.map(item => item.matchedDoc.doc_id);
+  const uniqueIds = new Set(docIdsInQueue);
+  if (uniqueIds.size !== docIdsInQueue.length) {
+    alert('❌ 操作已攔截！\n勾選的待上傳項目中存在重複的文件 ID，為確保資料一致性，同一個 ID 在同一回合僅限匯入一筆檔案。\n請取消重複項目的勾選後再試。');
     return;
   }
 
