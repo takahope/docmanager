@@ -688,7 +688,7 @@
     </div>
     <div class="modal-body">
       <div class="form-group"><label>來源文件</label><input id="r_ancestor" disabled></div>
-      <div class="form-group"><label>關聯到（目標文件）*</label><select id="r_descendant"></select></div>
+      <div class="form-group"><label>關聯到（目標文件）*</label><input type="text" id="r_descendant" list="r_descendant_list" placeholder="請輸入文件編號或標題篩選..." autocomplete="off"><datalist id="r_descendant_list"></datalist></div>
       <div class="form-group"><label>關聯類型</label><select id="r_type"></select>
         <div class="field-hint">supersedes（取代）：若目標文件為「已發布」，將自動標為「已廢止」</div>
       </div>
@@ -2794,11 +2794,12 @@ function openRelModal(ancestorId) {
   document.getElementById('r_ancestor').value = ancestorId;
 
   // 目標選項：排除自己
-  const sel = document.getElementById('r_descendant');
+  const sel = document.getElementById('r_descendant_list');
   sel.innerHTML = allDocs
     .filter(d => d.doc_id !== ancestorId)
-    .map(d => `<option value="${escapeHtml(d.doc_id)}">${escapeHtml(d.doc_id)}｜${escapeHtml(d.title)}</option>`)
+    .map(d => `<option value="${escapeHtml(d.doc_id)}｜${escapeHtml(d.title)}"></option>`)
     .join('');
+  document.getElementById('r_descendant').value = '';
 
   const typeSel = document.getElementById('r_type');
   typeSel.innerHTML = relationTypes.map(t =>
@@ -2810,16 +2811,19 @@ function openRelModal(ancestorId) {
 
 function saveRelation() {
   const ancestor = document.getElementById('r_ancestor').value;
-  const descendant = document.getElementById('r_descendant').value;
+  const descendantRaw = document.getElementById('r_descendant').value.trim();
+  const descendant = descendantRaw.split('｜')[0].trim();
   const type = document.getElementById('r_type').value;
   const desc = document.getElementById('r_desc').value.trim();
 
   if (!descendant) { showToast('請選擇目標文件'); return; }
 
+  const target = allDocs.find(d => d.doc_id === descendant);
+  if (!target) { showToast('無效的目標文件，請從下拉選單中選取有效文件'); return; }
+
   // supersedes 會自動廢止已發布的目標文件 → 送出前確認
   if (type === 'supersedes') {
-    const target = allDocs.find(d => d.doc_id === descendant);
-    if (target && target.status === '已發布') {
+    if (target.status === '已發布') {
       if (!confirm(`「${descendant}｜${target.title}」目前為已發布狀態。\n建立 supersedes 關聯後將自動標為「已廢止」，確定繼續？`)) return;
     }
   }
