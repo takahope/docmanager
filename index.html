@@ -3391,8 +3391,8 @@ function openDocxExportModal() {
   const sel = document.getElementById('docxExportTagSelect');
   sel.innerHTML = '<option value="">— 請選擇 —</option>';
   
-  if (window.tags && window.tags.length > 0) {
-    window.tags.forEach(t => {
+  if (tags && tags.length > 0) {
+    tags.forEach(t => {
       sel.innerHTML += `<option value="${t.tag_id}">${escapeHtml(t.name)}</option>`;
     });
   }
