@@ -1383,7 +1383,7 @@ function apiExportNativeDocument(tagId) {
 
   const group_ISMSPIMS = [];
   const group_ISMS = [];
-  const group_PISM = [];
+  const group_PIMS = [];
   const group_Other = {}; // map of category -> array of rows
 
   const sortedParentIds = Array.from(targetDocIds).sort();
@@ -1423,8 +1423,8 @@ function apiExportNativeDocument(tagId) {
       group_ISMSPIMS.push(...parentRows);
     } else if (parentId.startsWith('TWHB-ISMS-')) {
       group_ISMS.push(...parentRows);
-    } else if (parentId.startsWith('TWHB-PISM-')) {
-      group_PISM.push(...parentRows);
+    } else if (parentId.startsWith('TWHB-PIMS-')) {
+      group_PIMS.push(...parentRows);
     } else {
       const cat = parentDoc.category || '其他';
       if (!group_Other[cat]) group_Other[cat] = [];
@@ -1521,12 +1521,12 @@ function apiExportNativeDocument(tagId) {
     }
   }
 
-  const hasAnyData = group_ISMSPIMS.length > 0 || group_ISMS.length > 0 || group_PISM.length > 0 || Object.keys(group_Other).length > 0;
+  const hasAnyData = group_ISMSPIMS.length > 0 || group_ISMS.length > 0 || group_PIMS.length > 0 || Object.keys(group_Other).length > 0;
   
   if (hasAnyData) {
     processGroup_('\\{\\{ROW_ISMSPIMS\\}\\}', group_ISMSPIMS);
     processGroup_('\\{\\{ROW_ISMS\\}\\}', group_ISMS);
-    processGroup_('\\{\\{ROW_PISM\\}\\}', group_PISM);
+    processGroup_('\\{\\{ROW_PIMS\\}\\}', group_PIMS);
 
     // 處理其他動態類別群組
     const fHeader = body.findText('\\{\\{DYNAMIC_CAT_HEADER\\}\\}');
