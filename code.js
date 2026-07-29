@@ -1621,3 +1621,51 @@ function apiBatchUpdateMetadata(updateList) {
     lock.releaseLock();
   }
 }
+
+/**
+ * 轉義正規表示式特殊字元
+ */
+function escapeRegExp_(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 根據資料夾現有檔案自動生成流水編號
+ */
+function createRecordNoFromFolder_(folder, prefix, dateKey) {
+  const escapedPrefix = escapeRegExp_(prefix);
+  const pattern = new RegExp(escapedPrefix + '-' + dateKey + '-(\\d+)');
+
+  let maxSerial = 0;
+  const files = folder.getFiles();
+  while (files.hasNext()) {
+    const file = files.next();
+    const name = String(file.getName() || '').trim();
+    const match = name.match(pattern);
+    if (!match) continue;
+
+    const serial = parseInt(match[1], 10);
+    if (!isNaN(serial) && serial > maxSerial) {
+      maxSerial = serial;
+    }
+  }
+
+  const nextSerial = maxSerial + 1;
+  const serialText = nextSerial < 100 ? ('0' + nextSerial).slice(-2) : String(nextSerial);
+  return prefix + '-' + dateKey + '-' + serialText;
+}
+
+/**
+ * 替換 Google Doc 中所有區塊（正文/頁首/頁尾）的 {{佔位符}}
+ */
+function replaceTemplateTokens_(doc, tokenMap) {
+  const sections = [doc.getBody(), doc.getHeader(), doc.getFooter()].filter(Boolean);
+  const keys = Object.keys(tokenMap || {});
+
+  sections.forEach(function(section) {
+    keys.forEach(function(key) {
+      const pattern = '\\{\\{\\s*' + escapeRegExp_(key) + '\\s*\\}\\}';
+      section.replaceText(pattern, String(tokenMap[key]));
+    });
+  });
+}
