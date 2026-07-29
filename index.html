@@ -420,6 +420,10 @@
     .admin-cols { flex-direction: column; }
   }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/docxtemplater/3.55.7/docxtemplater.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pizzip/3.1.7/pizzip.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pizzip/3.1.7/pizzip-utils.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 </head>
 <body>
 
@@ -470,6 +474,7 @@
           <select id="filterCategory"><option value="">全部類別</option></select>
           <select id="filterStatus"><option value="">全部狀態</option></select>
           <button class="btn-export" onclick="exportCsv()">⬇ 匯出 CSV</button>
+          <button class="btn-export" onclick="openDocxExportModal()" style="margin-left: 8px;">⬇ 匯出文件一覽表(Word)</button>
           <button id="btnOpenBatchImport" class="btn btn-outline-primary me-2" style="display:none;" onclick="openBatchImportModal()">
             <i class="fas fa-file-import"></i> 批次匯入檔案
           </button>
@@ -772,6 +777,27 @@
     <div class="modal-footer">
       <button type="button" id="btnCloseBatchImportModalBottom" onclick="closeBatchImportModal()">取消 / 關閉</button>
       <button type="button" class="btn-primary" id="btnStartBatchImportExecution" disabled onclick="startBatchImportExecution()">確認並開始批次匯入</button>
+    </div>
+  </div>
+</div>
+
+<!-- 匯出 Docx Modal -->
+<div class="modal-backdrop" id="docxExportModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span>匯出文件一覽表(Word)</span>
+      <button class="btn-x" onclick="tryCloseModal('docxExportModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>選擇標籤 (Tag)</label>
+        <select id="docxExportTagSelect"></select>
+        <div class="field-hint">報表將匯出此標籤內的文件，並依照父子關係排列。</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button onclick="tryCloseModal('docxExportModal')">取消</button>
+      <button class="btn-primary" onclick="execDocxExport()">確認匯出</button>
     </div>
   </div>
 </div>
@@ -3346,6 +3372,93 @@ function onPreviewUserChange() {
       host.innerHTML = '<div class="grant-hint">查詢失敗：' + escapeHtml(err.message) + '</div>';
     })
     .apiPreviewUserTags(email);
+}
+
+// ============================================================
+// Docx Export Logic
+// ============================================================
+function base64ToArrayBuffer(base64) {
+  var binary_string = window.atob(base64);
+  var len = binary_string.length;
+  var bytes = new Uint8Array(len);
+  for (var i = 0; i < len; i++) {
+    bytes[i] = binary_string.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+function openDocxExportModal() {
+  const sel = document.getElementById('docxExportTagSelect');
+  sel.innerHTML = '<option value="">— 請選擇 —</option>';
+  
+  if (window.tags && window.tags.length > 0) {
+    window.tags.forEach(t => {
+      sel.innerHTML += `<option value="${t.tag_id}">${escapeHtml(t.name)}</option>`;
+    });
+  }
+  
+  document.getElementById('docxExportModal').classList.add('show');
+}
+
+function execDocxExport() {
+  const tagId = document.getElementById('docxExportTagSelect').value;
+  if (!tagId) {
+    showToast('請選擇一個標籤');
+    return;
+  }
+  
+  const tagOption = document.getElementById('docxExportTagSelect').options[document.getElementById('docxExportTagSelect').selectedIndex];
+  const tagName = tagOption.text;
+  
+  document.getElementById('loading').classList.remove('hide');
+  document.getElementById('loading').innerText = '正在產生文件，請稍候...';
+  
+  google.script.run
+    .withSuccessHandler(function(result) {
+      document.getElementById('loading').classList.add('hide');
+      document.getElementById('loading').innerText = '處理中…';
+      tryCloseModal('docxExportModal');
+      
+      if (!result.data || result.data.length === 0) {
+        showToast('該標籤下無任何文件');
+        return;
+      }
+      
+      generateDocx(result.templateBase64, result.data, tagName);
+    })
+    .withFailureHandler(function(err) {
+      document.getElementById('loading').classList.add('hide');
+      document.getElementById('loading').innerText = '處理中…';
+      showToast('匯出失敗：' + err.message);
+    })
+    .apiGetDocxExportData(tagId);
+}
+
+function generateDocx(templateBase64, data, tagName) {
+  try {
+    const arrayBuffer = base64ToArrayBuffer(templateBase64);
+    const zip = new PizZip(arrayBuffer);
+    const doc = new window.docxtemplater(zip, {
+      paragraphLoop: true,
+      linebreaks: true,
+    });
+    
+    doc.render({
+      docs: data
+    });
+    
+    const out = doc.getZip().generate({
+      type: "blob",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    
+    const dateStr = new Date().toISOString().split('T')[0];
+    saveAs(out, `${tagName}_資訊安全暨個人資料管理文件一覽表_${dateStr}.docx`);
+    showToast('匯出成功！');
+  } catch (error) {
+    console.error(error);
+    showToast('文件產生失敗，請檢查範本格式。');
+  }
 }
 </script>
 </body>
