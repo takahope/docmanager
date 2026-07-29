@@ -1455,6 +1455,13 @@ function apiExportNativeDocument(tagId) {
   const prefix = _getProp(PROP_KEYS.RECORD_NUMBER_PREFIX) || 'IS-R-032';
   const recordNo = createRecordNoFromFolder_(outputFolder, prefix, dateKey);
 
+  console.log("【DEBUG】準備替換佔位符的資料：", {
+    year: year,
+    month: month,
+    day: day,
+    recordNo: recordNo
+  });
+
   // --- 檔名新規格：文件編號_文件名稱_版本_recordNo ---
   const targetListDocId = 'TWHB-ISMSPIMS-004-003';
   const targetListDocName = '資訊安全暨個人資料管理文件一覽表';
@@ -1709,13 +1716,30 @@ function createRecordNoFromFolder_(folder, prefix, dateKey) {
  * 替換 Google Doc 中所有區塊（正文/頁首/頁尾）的 {{佔位符}}
  */
 function replaceTemplateTokens_(doc, tokenMap) {
-  const sections = [doc.getBody(), doc.getHeader(), doc.getFooter()].filter(Boolean);
+  const body = doc.getBody();
+  const header = doc.getHeader();
+  const footer = doc.getFooter();
+
+  console.log("【DEBUG】取得 Document 區塊狀態：", {
+    hasBody: !!body,
+    hasHeader: !!header,
+    hasFooter: !!footer
+  });
+
+  const sections = [
+    { name: 'Body', obj: body },
+    { name: 'Header', obj: header },
+    { name: 'Footer', obj: footer }
+  ].filter(s => s.obj);
+
   const keys = Object.keys(tokenMap || {});
 
-  sections.forEach(function(section) {
+  sections.forEach(function(sectionDef) {
     keys.forEach(function(key) {
       const pattern = '\\{\\{\\s*' + escapeRegExp_(key) + '\\s*\\}\\}';
-      section.replaceText(pattern, String(tokenMap[key]));
+      const found = sectionDef.obj.findText(pattern);
+      console.log(`【DEBUG】在 ${sectionDef.name} 中尋找佔位符 ${key} (Pattern: ${pattern}) -> 找到: ${!!found}`);
+      sectionDef.obj.replaceText(pattern, String(tokenMap[key]));
     });
   });
 }
