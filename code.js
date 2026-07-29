@@ -1330,159 +1330,95 @@ function apiPreviewUserTags(email) {
   }));
 }
 
-function apiGetDocxExportData(tagId) {
-  const ctx = getUserContext();
+function apiExportNativeDocument(tagId) {
+  const ctx = _assertWhitelisted();
   const visibleDocIds = _getVisibleDocIds(ctx);
-  
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  
-  // 1. Get all documents
-  const docSheet = ss.getSheetByName(SHEET_NAMES.DOCS);
+
+  const docSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.DOCS);
   const docData = docSheet.getDataRange().getDisplayValues();
+  
+  const closureSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.CLOSURE);
+  const closureData = closureSheet.getDataRange().getDisplayValues();
+  
+  const docTagsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.DOC_TAGS);
+  const docTagsData = docTagsSheet.getDataRange().getDisplayValues();
+  
+  let targetDocIds = new Set();
+  for (let i = 1; i < docTagsData.length; i++) {
+    if (docTagsData[i][1] === tagId && visibleDocIds.has(docTagsData[i][0])) {
+      targetDocIds.add(docTagsData[i][0]);
+    }
+  }
+
   const allDocs = {};
   for (let i = 1; i < docData.length; i++) {
-    const row = docData[i];
-    const docId = row[DOC_COL.DOC_ID];
-    if (visibleDocIds.has(docId)) {
-      allDocs[docId] = {
-        doc_id: docId,
-        title: row[DOC_COL.TITLE],
-        category: row[DOC_COL.CATEGORY],
-        security_level: row[DOC_COL.SECURITY_LEVEL] || '一般',
-        version: row[DOC_COL.VERSION],
-        published_at: row[DOC_COL.PUBLISHED_AT]
+    const id = docData[i][DOC_COL.DOC_ID];
+    if (visibleDocIds.has(id)) {
+      allDocs[id] = {
+        doc_id: id,
+        title: docData[i][DOC_COL.TITLE],
+        category: docData[i][DOC_COL.CATEGORY],
+        security_level: docData[i][DOC_COL.SECURITY_LEVEL] || "",
+        version: docData[i][DOC_COL.VERSION],
+        published_at: docData[i][DOC_COL.PUBLISHED_AT]
       };
     }
   }
 
-  // 2. Get tags for documents to filter by tagId
-  const docTagSheet = ss.getSheetByName(SHEET_NAMES.DOC_TAGS);
-  const docTagData = docTagSheet.getDataRange().getValues();
-  const docsWithTag = new Set();
-  for (let i = 1; i < docTagData.length; i++) {
-    const dId = String(docTagData[i][DOCTAG_COL.DOC_ID]).trim();
-    const tId = String(docTagData[i][DOCTAG_COL.TAG_ID]).trim();
-    if (tId === tagId && allDocs[dId]) {
-      docsWithTag.add(dId);
-    }
-  }
+  const tableData = [
+    ['文件編號', '文件名稱', '機密等級', '版本', '發行日期', '表單編號', '表單名稱', '表單版本', '表單發行日期']
+  ];
 
-  // 3. Get closure relationships
-  const clsSheet = ss.getSheetByName(SHEET_NAMES.CLOSURE);
-  const clsData = clsSheet.getDataRange().getValues();
-  
-  const parentToChildren = {};
-  const allChildren = new Set();
-  
-  for (let i = 1; i < clsData.length; i++) {
-    const row = clsData[i];
-    const ancestor = String(row[CLS_COL.ANCESTOR_ID]).trim();
-    const descendant = String(row[CLS_COL.DESCENDANT_ID]).trim();
-    const depth = parseInt(row[CLS_COL.DEPTH], 10);
+  for (const parentId of targetDocIds) {
+    if (!allDocs[parentId]) continue;
+    const parentDoc = allDocs[parentId];
+    let childrenIds = [];
     
-    if (depth === 1 && docsWithTag.has(ancestor) && docsWithTag.has(descendant)) {
-      if (!parentToChildren[ancestor]) {
-        parentToChildren[ancestor] = [];
+    for (let i = 1; i < closureData.length; i++) {
+      if (closureData[i][CLS_COL.ANCESTOR_ID] === parentId && 
+          closureData[i][CLS_COL.DEPTH] === "1" && 
+          closureData[i][CLS_COL.RELATION_TYPE] === 'related' &&
+          visibleDocIds.has(closureData[i][CLS_COL.DESCENDANT_ID])) {
+        childrenIds.push(closureData[i][CLS_COL.DESCENDANT_ID]);
       }
-      parentToChildren[ancestor].push(descendant);
-      allChildren.add(descendant);
     }
-  }
 
-  // 4. Flatten relationships
-  const flattenedData = [];
-  
-  // Sort docsWithTag for stable output if needed, but we'll just iterate
-  // It's better to sort by docId so the table looks organized
-  const sortedDocsWithTag = Array.from(docsWithTag).sort();
-  
-  for (const docId of sortedDocsWithTag) {
-    // If it's a child to another doc in this tag, it shouldn't be treated as a parent
-    if (allChildren.has(docId)) continue;
-    
-    const parentDoc = allDocs[docId];
-    const childrenIds = parentToChildren[docId] || [];
-    // Sort children for stable output
-    childrenIds.sort();
-    
     if (childrenIds.length === 0) {
-      flattenedData.push({
-        doc_id: parentDoc.doc_id,
-        title: parentDoc.title,
-        category: parentDoc.category,
-        security_level: parentDoc.security_level,
-        version: parentDoc.version,
-        published_at: parentDoc.published_at,
-        form_id: "",
-        form_title: "",
-        form_version: "",
-        form_published_at: ""
-      });
+      tableData.push([
+        parentDoc.doc_id, parentDoc.title, parentDoc.security_level, parentDoc.version, parentDoc.published_at,
+        "", "", "", ""
+      ]);
     } else {
       childrenIds.forEach((childId, index) => {
         const childDoc = allDocs[childId];
         if (index === 0) {
-          flattenedData.push({
-            doc_id: parentDoc.doc_id,
-            title: parentDoc.title,
-            category: parentDoc.category,
-            security_level: parentDoc.security_level,
-            version: parentDoc.version,
-            published_at: parentDoc.published_at,
-            form_id: childDoc.doc_id,
-            form_title: childDoc.title,
-            form_version: childDoc.version,
-            form_published_at: childDoc.published_at
-          });
+          tableData.push([
+            parentDoc.doc_id, parentDoc.title, parentDoc.security_level, parentDoc.version, parentDoc.published_at,
+            childDoc.doc_id, childDoc.title, childDoc.version, childDoc.published_at
+          ]);
         } else {
-          flattenedData.push({
-            doc_id: "",
-            title: "",
-            category: "",
-            security_level: "",
-            version: "",
-            published_at: "",
-            form_id: childDoc.doc_id,
-            form_title: childDoc.title,
-            form_version: childDoc.version,
-            form_published_at: childDoc.published_at
-          });
+          tableData.push([
+            "", "", "", "", "",
+            childDoc.doc_id, childDoc.title, childDoc.version, childDoc.published_at
+          ]);
         }
       });
     }
   }
 
-  // 5. Fetch template from Drive
   const templateId = _getProp(PROP_KEYS.DOCX_TEMPLATE_FILE_ID);
   if (!templateId) {
     throw new Error('系統尚未設定 Docx 範本檔案 (DOCX_TEMPLATE_FILE_ID)。');
   }
-  
-  let templateBase64 = "";
-  try {
-    const file = DriveApp.getFileById(templateId);
-    const mimeType = file.getMimeType();
-    let blob;
-    if (mimeType === MimeType.GOOGLE_DOCS) {
-      // 若範本是 Google 文件，透過 UrlFetchApp 將其匯出為 DOCX 格式
-      const url = `https://docs.google.com/document/d/${templateId}/export?format=docx`;
-      const token = ScriptApp.getOAuthToken();
-      const response = UrlFetchApp.fetch(url, {
-        headers: { 'Authorization': 'Bearer ' + token },
-        muteHttpExceptions: true
-      });
-      blob = response.getBlob();
-    } else {
-      // 假設它已經是一個 .docx 檔案
-      blob = file.getBlob();
-    }
-    templateBase64 = Utilities.base64Encode(blob.getBytes());
-  } catch (e) {
-    throw new Error('無法讀取或轉換 Docx 範本檔案。如果是 Google 文件，可能需要新的授權（請在編輯器中執行 authorizeOnce 取得 UrlFetchApp 權限）。詳細錯誤：' + e.message);
-  }
 
   const outputFolderId = _getProp(PROP_KEYS.DOCX_OUTPUT_FOLDER_ID);
-  let recordNo = "";
+  if (!outputFolderId) {
+    throw new Error('系統尚未設定 Docx 輸出資料夾 (DOCX_OUTPUT_FOLDER_ID)。');
+  }
+
+  const outputFolder = DriveApp.getFolderById(outputFolderId);
+  const templateFile = DriveApp.getFileById(templateId);
+
   const now = new Date();
   const tz = Session.getScriptTimeZone();
   const year = Utilities.formatDate(now, tz, 'yyyy');
@@ -1490,82 +1426,61 @@ function apiGetDocxExportData(tagId) {
   const day = Utilities.formatDate(now, tz, 'dd');
   const dateKey = Utilities.formatDate(now, tz, 'yyyyMMdd');
 
-  if (outputFolderId) {
-    const prefix = _getProp(PROP_KEYS.RECORD_NUMBER_PREFIX) || 'IS-R-032';
-    recordNo = _createRecordNoFromFolder(outputFolderId, prefix, dateKey);
-  }
+  const prefix = _getProp(PROP_KEYS.RECORD_NUMBER_PREFIX) || 'IS-R-032';
+  const recordNo = createRecordNoFromFolder_(outputFolder, prefix, dateKey);
 
-  return {
-    templateBase64: templateBase64,
-    data: flattenedData,
-    year: year,
-    month: month,
-    day: day,
-    recordNo: recordNo
-  };
-}
+  const newFileName = prefix + '_' + recordNo;
+  const copiedFile = templateFile.makeCopy(newFileName, outputFolder);
+  
+  const doc = DocumentApp.openById(copiedFile.getId());
+  const body = doc.getBody();
 
-function _escapeRegExp(value) {
-  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+  replaceTemplateTokens_(doc, {
+    '年': year,
+    '月': month,
+    '日': day,
+    '紀錄編號': recordNo
+  });
 
-function _createRecordNoFromFolder(folderId, prefix, dateKey) {
-  let folder;
-  try {
-    folder = DriveApp.getFolderById(folderId);
-  } catch(e) {
-    throw new Error('找不到輸出資料夾 (DOCX_OUTPUT_FOLDER_ID) 或無權限。');
-  }
+  if (tableData.length > 1) {
+    const found = body.findText('\\{\\{\\s*表格\\s*\\}\\}');
+    let table;
+    if (found) {
+      const textElement = found.getElement().asText();
+      textElement.deleteText(found.getStartOffset(), found.getEndOffsetInclusive());
+      let paragraph = textElement.getParent();
+      while (paragraph && paragraph.getType() !== DocumentApp.ElementType.PARAGRAPH) {
+        paragraph = paragraph.getParent();
+      }
+      const index = paragraph ? body.getChildIndex(paragraph) : body.getNumChildren();
+      table = body.insertTable(index + 1, tableData);
+      if (paragraph && !paragraph.asParagraph().getText().trim()) {
+        body.removeChild(paragraph);
+      }
+    } else {
+      table = body.appendTable(tableData);
+    }
 
-  const escapedPrefix = _escapeRegExp(prefix);
-  const pattern = new RegExp('^' + escapedPrefix + '-' + dateKey + '-(\\d+)');
-
-  let maxSerial = 0;
-  const files = folder.getFiles();
-  while (files.hasNext()) {
-    const file = files.next();
-    const name = String(file.getName() || '').trim();
-    const match = name.match(pattern);
-    if (!match) continue;
-
-    const serial = parseInt(match[1], 10);
-    if (!isNaN(serial) && serial > maxSerial) {
-      maxSerial = serial;
+    for (let r = 0; r < table.getNumRows(); r++) {
+      const row = table.getRow(r);
+      for (let c = 0; c < row.getNumCells(); c++) {
+        const cell = row.getCell(c);
+        cell.setPaddingTop(6).setPaddingBottom(6).setPaddingLeft(6).setPaddingRight(6);
+        if (r === 0) {
+          cell.setBackgroundColor('#e5e7eb');
+          cell.editAsText().setBold(true).setForegroundColor('#111827');
+        }
+      }
     }
   }
 
-  const nextSerial = maxSerial + 1;
-  const serialText = nextSerial < 100 ? ('0' + nextSerial).slice(-2) : String(nextSerial);
-  return prefix + '-' + dateKey + '-' + serialText;
-}
+  doc.saveAndClose();
 
-function apiSaveDocxToDrive(base64Data, fileName) {
-  const ctx = getUserContext();
-  if (!ctx.isWhitelisted) {
-    throw new Error("無存取權限");
-  }
-
-  const folderId = _getProp(PROP_KEYS.DOCX_OUTPUT_FOLDER_ID);
-  if (!folderId) {
-    throw new Error("系統尚未設定 DOCX_OUTPUT_FOLDER_ID");
-  }
-
-  try {
-    const folder = DriveApp.getFolderById(folderId);
-    const blob = Utilities.newBlob(
-      Utilities.base64Decode(base64Data), 
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 
-      fileName
-    );
-    const newFile = folder.createFile(blob);
-    return {
-      success: true,
-      fileId: newFile.getId(),
-      url: newFile.getUrl()
-    };
-  } catch (err) {
-    throw new Error("存檔失敗：" + err.message);
-  }
+  return {
+    success: true,
+    url: doc.getUrl(),
+    recordNo: recordNo
+  };
 }
 
 // 批次更新文件屬性 (機密等級與發行日期)
