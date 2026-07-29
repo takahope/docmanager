@@ -3424,7 +3424,7 @@ function execDocxExport() {
         return;
       }
       
-      generateDocx(result.templateBase64, result.data, tagName);
+      generateDocx(result, tagName);
     })
     .withFailureHandler(function(err) {
       document.getElementById('loading').classList.add('hide');
@@ -3434,9 +3434,9 @@ function execDocxExport() {
     .apiGetDocxExportData(tagId);
 }
 
-function generateDocx(templateBase64, data, tagName) {
+function generateDocx(result, tagName) {
   try {
-    const arrayBuffer = base64ToArrayBuffer(templateBase64);
+    const arrayBuffer = base64ToArrayBuffer(result.templateBase64);
     const zip = new PizZip(arrayBuffer);
     const doc = new window.docxtemplater(zip, {
       paragraphLoop: true,
@@ -3444,19 +3444,57 @@ function generateDocx(templateBase64, data, tagName) {
     });
     
     doc.render({
-      docs: data
+      年: result.year || '',
+      月: result.month || '',
+      日: result.day || '',
+      紀錄編號: result.recordNo || '',
+      docs: result.data
     });
     
-    const out = doc.getZip().generate({
+    const blob = doc.getZip().generate({
       type: "blob",
       mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     });
     
+    const recordPrefix = result.recordNo ? `${result.recordNo}_` : '';
     const dateStr = new Date().toISOString().split('T')[0];
-    saveAs(out, `${tagName}_資訊安全暨個人資料管理文件一覽表_${dateStr}.docx`);
-    showToast('匯出成功！');
+    const fileName = `${tagName}_資訊安全暨個人資料管理文件一覽表_${recordPrefix}${dateStr}.docx`;
+
+    // 準備上傳至雲端
+    document.getElementById('loading').classList.remove('hide');
+    document.getElementById('loading').innerText = '正在存檔至 Google Drive...';
+
+    const reader = new FileReader();
+    reader.onload = function() {
+      // FileReader 讀出的資料為 data:MIME;base64,... 我們只需要 base64 部分
+      const base64Data = reader.result.split(',')[1];
+      
+      google.script.run
+        .withSuccessHandler(function(saveRes) {
+          document.getElementById('loading').classList.add('hide');
+          showToast('存檔成功，即將開始下載！');
+          saveAs(blob, fileName);
+        })
+        .withFailureHandler(function(err) {
+          document.getElementById('loading').classList.add('hide');
+          console.error(err);
+          // 容錯：若雲端存檔失敗，仍提供本地下載以免白費
+          showToast('雲端存檔失敗：' + err.message + '。仍會為您下載檔案。');
+          saveAs(blob, fileName);
+        })
+        .apiSaveDocxToDrive(base64Data, fileName);
+    };
+    reader.onerror = function() {
+      document.getElementById('loading').classList.add('hide');
+      showToast('讀取檔案失敗，無法存檔。');
+    };
+    
+    // 將 blob 讀取為 DataURL 以便取得 Base64
+    reader.readAsDataURL(blob);
+
   } catch (error) {
     console.error(error);
+    document.getElementById('loading').classList.add('hide');
     showToast('文件產生失敗，請檢查範本格式。');
   }
 }
