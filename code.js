@@ -1474,13 +1474,6 @@ function apiExportNativeDocument(tagId) {
   const doc = DocumentApp.openById(copiedFile.getId());
   const body = doc.getBody();
 
-  replaceTemplateTokens_(doc, {
-    '年': year,
-    '月': month,
-    '日': day,
-    '紀錄編號': recordNo
-  });
-
   // 輔助函數：安全地設定儲存格文字，保留段落對齊格式
   function setCellTextSafe_(cell, text) {
     if (cell.getNumChildren() > 0 && cell.getChild(0).getType() === DocumentApp.ElementType.PARAGRAPH) {
@@ -1607,6 +1600,14 @@ function apiExportNativeDocument(tagId) {
       }
     }
   }
+
+  // 將全域變數替換移到最後，避免 DocumentApp 的 DOM 操作造成 Header 修改遺失
+  replaceTemplateTokens_(doc, {
+    '年': year,
+    '月': month,
+    '日': day,
+    '紀錄編號': recordNo
+  });
 
   doc.saveAndClose();
 
