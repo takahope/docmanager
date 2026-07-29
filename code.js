@@ -1499,10 +1499,19 @@ function apiExportNativeDocument(tagId) {
     const table = templateRow.getParent().asTable();
 
     if (dataRows.length === 0) {
-      // 若該類別無資料，連同上方的標頭列一併刪除
+      // 若該類別無資料，僅在上方真的是標頭列時才刪除（避免誤刪日期或欄位列）
       const headerRow = templateRow.getPreviousSibling();
       if (headerRow && headerRow.getType() === DocumentApp.ElementType.TABLE_ROW) {
-        headerRow.removeFromParent();
+        const text = headerRow.getText() || '';
+        // 透過關鍵字判斷是否為我們定義的分類標頭
+        const isCatHeader = text.includes('資訊安全') || 
+                            text.includes('個人資料') || 
+                            text.includes('管理系統') || 
+                            text.includes('共用文件') ||
+                            text.includes('使用文件');
+        if (isCatHeader) {
+          headerRow.removeFromParent();
+        }
       }
       templateRow.removeFromParent();
     } else {
