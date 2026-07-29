@@ -1381,9 +1381,10 @@ function apiExportNativeDocument(tagId) {
     }
   }
 
-  const tableData = [
-    ['文件編號', '文件名稱', '機密等級', '文件版本', '發行日期', '表單編號', '表單名稱', '版本', '發行日期', '備註']
-  ];
+  const group_ISMSPIMS = [];
+  const group_ISMS = [];
+  const group_PISM = [];
+  const group_Other = {}; // map of category -> array of rows
 
   const sortedParentIds = Array.from(targetDocIds).sort();
 
@@ -1395,8 +1396,9 @@ function apiExportNativeDocument(tagId) {
     let childrenIds = parentToChildren[parentId] || [];
     childrenIds.sort();
 
+    const parentRows = [];
     if (childrenIds.length === 0) {
-      tableData.push([
+      parentRows.push([
         parentDoc.doc_id, parentDoc.title, parentDoc.security_level, parentDoc.version, parentDoc.published_at,
         "", "", "", "", ""
       ]);
@@ -1404,17 +1406,29 @@ function apiExportNativeDocument(tagId) {
       childrenIds.forEach((childId, index) => {
         const childDoc = allDocs[childId];
         if (index === 0) {
-          tableData.push([
+          parentRows.push([
             parentDoc.doc_id, parentDoc.title, parentDoc.security_level, parentDoc.version, parentDoc.published_at,
             childDoc.doc_id, childDoc.title, childDoc.version, childDoc.published_at, ""
           ]);
         } else {
-          tableData.push([
+          parentRows.push([
             "", "", "", "", "",
             childDoc.doc_id, childDoc.title, childDoc.version, childDoc.published_at, ""
           ]);
         }
       });
+    }
+
+    if (parentId.startsWith('TWHB-ISMSPIMS-')) {
+      group_ISMSPIMS.push(...parentRows);
+    } else if (parentId.startsWith('TWHB-ISMS-')) {
+      group_ISMS.push(...parentRows);
+    } else if (parentId.startsWith('TWHB-PISM-')) {
+      group_PISM.push(...parentRows);
+    } else {
+      const cat = parentDoc.category || '其他';
+      if (!group_Other[cat]) group_Other[cat] = [];
+      group_Other[cat].push(...parentRows);
     }
   }
 
@@ -1454,35 +1468,104 @@ function apiExportNativeDocument(tagId) {
     '紀錄編號': recordNo
   });
 
-  if (tableData.length > 1) {
-    const found = body.findText('\\{\\{\\s*表格\\s*\\}\\}');
-    let table;
-    if (found) {
-      const textElement = found.getElement().asText();
-      textElement.deleteText(found.getStartOffset(), found.getEndOffsetInclusive());
-      let paragraph = textElement.getParent();
-      while (paragraph && paragraph.getType() !== DocumentApp.ElementType.PARAGRAPH) {
-        paragraph = paragraph.getParent();
-      }
-      const index = paragraph ? body.getChildIndex(paragraph) : body.getNumChildren();
-      table = body.insertTable(index + 1, tableData);
-      if (paragraph && !paragraph.asParagraph().getText().trim()) {
-        body.removeChild(paragraph);
+  // 輔助函數：安全地設定儲存格文字，保留段落對齊格式
+  function setCellTextSafe_(cell, text) {
+    if (cell.getNumChildren() > 0 && cell.getChild(0).getType() === DocumentApp.ElementType.PARAGRAPH) {
+      cell.getChild(0).asParagraph().setText(text);
+      while (cell.getNumChildren() > 1) {
+        cell.removeChild(cell.getChild(1));
       }
     } else {
-      table = body.appendTable(tableData);
+      cell.setText(text);
     }
+  }
 
-    for (let r = 0; r < table.getNumRows(); r++) {
-      const row = table.getRow(r);
-      for (let c = 0; c < row.getNumCells(); c++) {
-        const cell = row.getCell(c);
-        cell.setPaddingTop(6).setPaddingBottom(6).setPaddingLeft(6).setPaddingRight(6);
-        if (r === 0) {
-          cell.setBackgroundColor('#e5e7eb');
-          cell.editAsText().setBold(true).setForegroundColor('#111827');
-        }
+  // 處理固定類別群組
+  function processGroup_(placeholderText, dataRows) {
+    const f = body.findText(placeholderText);
+    if (!f) return;
+    let el = f.getElement();
+    while (el.getType() !== DocumentApp.ElementType.TABLE_ROW) { el = el.getParent(); }
+    const templateRow = el.asTableRow();
+    const table = templateRow.getParent().asTable();
+
+    if (dataRows.length === 0) {
+      // 若該類別無資料，連同上方的標頭列一併刪除
+      const headerRow = templateRow.getPreviousSibling();
+      if (headerRow && headerRow.getType() === DocumentApp.ElementType.TABLE_ROW) {
+        headerRow.removeFromParent();
       }
+      templateRow.removeFromParent();
+    } else {
+      let insertIndex = table.getChildIndex(templateRow) + 1;
+      dataRows.forEach(rowData => {
+        const newRow = table.insertTableRow(insertIndex++);
+        for (let c = 0; c < templateRow.getNumCells(); c++) {
+          const newCell = templateRow.getCell(c).copy();
+          if (c < rowData.length) {
+            setCellTextSafe_(newCell, String(rowData[c]));
+          }
+          newRow.appendTableCell(newCell);
+        }
+      });
+      templateRow.removeFromParent();
+    }
+  }
+
+  const hasAnyData = group_ISMSPIMS.length > 0 || group_ISMS.length > 0 || group_PISM.length > 0 || Object.keys(group_Other).length > 0;
+  
+  if (hasAnyData) {
+    processGroup_('\\{\\{ROW_ISMSPIMS\\}\\}', group_ISMSPIMS);
+    processGroup_('\\{\\{ROW_ISMS\\}\\}', group_ISMS);
+    processGroup_('\\{\\{ROW_PISM\\}\\}', group_PISM);
+
+    // 處理其他動態類別群組
+    const fHeader = body.findText('\\{\\{DYNAMIC_CAT_HEADER\\}\\}');
+    const fRow = body.findText('\\{\\{ROW_OTHER\\}\\}');
+    if (fHeader && fRow) {
+      let elH = fHeader.getElement();
+      while (elH.getType() !== DocumentApp.ElementType.TABLE_ROW) { elH = elH.getParent(); }
+      const headerRowTemp = elH.asTableRow();
+      
+      let elR = fRow.getElement();
+      while (elR.getType() !== DocumentApp.ElementType.TABLE_ROW) { elR = elR.getParent(); }
+      const rowTemp = elR.asTableRow();
+
+      const table = rowTemp.getParent().asTable();
+      let insertIndex = table.getChildIndex(rowTemp) + 1;
+
+      const catKeys = Object.keys(group_Other).sort();
+      catKeys.forEach(cat => {
+        const dataRows = group_Other[cat];
+        // 插入動態標頭
+        const newHeader = table.insertTableRow(insertIndex++);
+        for (let c = 0; c < headerRowTemp.getNumCells(); c++) {
+          const hc = headerRowTemp.getCell(c).copy();
+          if (c === 0) setCellTextSafe_(hc, cat);
+          newHeader.appendTableCell(hc);
+        }
+        
+        // 插入資料
+        dataRows.forEach(rowData => {
+          const newRow = table.insertTableRow(insertIndex++);
+          for (let c = 0; c < rowTemp.getNumCells(); c++) {
+            const newCell = rowTemp.getCell(c).copy();
+            if (c < rowData.length) {
+              setCellTextSafe_(newCell, String(rowData[c]));
+            }
+            newRow.appendTableCell(newCell);
+          }
+        });
+      });
+
+      // 刪除動態範本列
+      rowTemp.removeFromParent();
+      headerRowTemp.removeFromParent();
+    } else if (fRow) {
+      // 容錯：找不到 header 但有 row 佔位符時將其清除
+      let elR = fRow.getElement();
+      while (elR.getType() !== DocumentApp.ElementType.TABLE_ROW) { elR = elR.getParent(); }
+      elR.asTableRow().removeFromParent();
     }
   }
 
