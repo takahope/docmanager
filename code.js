@@ -1618,6 +1618,126 @@ function apiExportNativeDocument(tagId) {
 
   doc.saveAndClose();
 
+  const documentId = copiedFile.getId();
+  
+  // Phase 2: Docs REST API to merge cells
+  // Requires "Docs" Advanced Service to be enabled
+  const docStruct = Docs.Documents.get(documentId);
+  const requests = [];
+  
+  if (docStruct.body && docStruct.body.content) {
+    docStruct.body.content.forEach(element => {
+      if (element.table) {
+        const tableStartIndex = element.startIndex;
+        const tableRows = element.table.tableRows;
+        
+        let i = 0;
+        while (i < tableRows.length) {
+          const row = tableRows[i];
+          const firstCell = row.tableCells[0];
+          
+          let text = "";
+          if (firstCell.content) {
+            firstCell.content.forEach(elem => {
+              if (elem.paragraph && elem.paragraph.elements) {
+                elem.paragraph.elements.forEach(pe => {
+                  if (pe.textRun) text += pe.textRun.content;
+                });
+              }
+            });
+          }
+          text = text.trim();
+          
+          // Identify parent row: non-empty and not a header row
+          if (text !== "" && text !== "文件編號" && !text.includes("文件")) {
+            let span = 1;
+            let j = i + 1;
+            
+            while (j < tableRows.length) {
+              const nextRow = tableRows[j];
+              const nextFirstCell = nextRow.tableCells[0];
+              
+              let nextText = "";
+              if (nextFirstCell.content) {
+                nextFirstCell.content.forEach(elem => {
+                  if (elem.paragraph && elem.paragraph.elements) {
+                    elem.paragraph.elements.forEach(pe => {
+                      if (pe.textRun) nextText += pe.textRun.content;
+                    });
+                  }
+                });
+              }
+              nextText = nextText.trim();
+              
+              if (nextText === "") {
+                span++;
+                j++;
+              } else {
+                break;
+              }
+            }
+            
+            if (span > 1) {
+              // Merge columns 0 to 4
+              for (let c = 0; c < 5; c++) {
+                requests.push({
+                  mergeTableCells: {
+                    tableRange: {
+                      tableCellLocation: {
+                        tableStartLocation: { index: tableStartIndex },
+                        rowIndex: i,
+                        columnIndex: c
+                      },
+                      rowSpan: span,
+                      columnSpan: 1
+                    }
+                  }
+                });
+              }
+            }
+            i = j;
+          } else {
+            i++;
+          }
+        }
+      }
+    });
+  }
+  
+  if (requests.length > 0) {
+    Docs.Documents.batchUpdate({ requests: requests }, documentId);
+    
+    // Phase 3: Cleanup empty paragraphs concatenated by the API
+    const docCleanup = DocumentApp.openById(documentId);
+    const bodyCleanup = docCleanup.getBody();
+    const tables = bodyCleanup.getTables();
+    
+    tables.forEach(table => {
+      for (let r = 0; r < table.getNumRows(); r++) {
+        const row = table.getRow(r);
+        // Only clean up the first 5 columns which were merged
+        for (let c = 0; c < 5; c++) {
+          const cell = row.getCell(c);
+          
+          // Remove trailing empty paragraphs
+          while (cell.getNumChildren() > 1) {
+            const lastChild = cell.getChild(cell.getNumChildren() - 1);
+            if (lastChild.getType() === DocumentApp.ElementType.PARAGRAPH) {
+              const p = lastChild.asParagraph();
+              if (p.getText().trim() === "") {
+                cell.removeChild(lastChild);
+                continue;
+              }
+            }
+            break;
+          }
+        }
+      }
+    });
+    
+    docCleanup.saveAndClose();
+  }
+
   return {
     success: true,
     url: doc.getUrl(),
