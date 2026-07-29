@@ -1461,9 +1461,24 @@ function apiGetDocxExportData(tagId) {
   let templateBase64 = "";
   try {
     const file = DriveApp.getFileById(templateId);
-    templateBase64 = Utilities.base64Encode(file.getBlob().getBytes());
+    const mimeType = file.getMimeType();
+    let blob;
+    if (mimeType === MimeType.GOOGLE_DOCS) {
+      // 若範本是 Google 文件，透過 UrlFetchApp 將其匯出為 DOCX 格式
+      const url = `https://docs.google.com/document/d/${templateId}/export?format=docx`;
+      const token = ScriptApp.getOAuthToken();
+      const response = UrlFetchApp.fetch(url, {
+        headers: { 'Authorization': 'Bearer ' + token },
+        muteHttpExceptions: true
+      });
+      blob = response.getBlob();
+    } else {
+      // 假設它已經是一個 .docx 檔案
+      blob = file.getBlob();
+    }
+    templateBase64 = Utilities.base64Encode(blob.getBytes());
   } catch (e) {
-    throw new Error('無法讀取 Docx 範本檔案，請檢查檔案 ID 或權限。');
+    throw new Error('無法讀取或轉換 Docx 範本檔案。如果是 Google 文件，可能需要新的授權（請在編輯器中執行 authorizeOnce 取得 UrlFetchApp 權限）。詳細錯誤：' + e.message);
   }
 
   const outputFolderId = _getProp(PROP_KEYS.DOCX_OUTPUT_FOLDER_ID);
