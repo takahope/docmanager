@@ -69,6 +69,7 @@ function _readDocs() {
       pending_file_id:    r[DOC_COL.PENDING_FILE_ID] || '',
       pending_version:    r[DOC_COL.PENDING_VERSION] || '',
       pending_file_name:  r[DOC_COL.PENDING_FILE_NAME] || '',
+      security_level:     r[DOC_COL.SECURITY_LEVEL] || '一般',
     }));
 }
 
@@ -117,6 +118,7 @@ function _docToRow(doc) {
   row[DOC_COL.PENDING_FILE_ID]  = doc.pending_file_id || '';
   row[DOC_COL.PENDING_VERSION]  = doc.pending_version || '';
   row[DOC_COL.PENDING_FILE_NAME] = doc.pending_file_name || '';
+  row[DOC_COL.SECURITY_LEVEL]   = doc.security_level || '一般';
   return row;
 }
 
@@ -190,6 +192,7 @@ function apiGetInitData() {
     docs: docs,
     statuses: DOC_STATUS,
     categories: DOC_CATEGORIES,
+    securityLevels: SECURITY_LEVELS,
     relationTypes: RELATION_TYPES,
     reviewCycles: REVIEW_CYCLES,
     statusTransitions: STATUS_TRANSITIONS,
