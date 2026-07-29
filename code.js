@@ -1716,30 +1716,31 @@ function createRecordNoFromFolder_(folder, prefix, dateKey) {
  * 替換 Google Doc 中所有區塊（正文/頁首/頁尾）的 {{佔位符}}
  */
 function replaceTemplateTokens_(doc, tokenMap) {
-  const body = doc.getBody();
-  const header = doc.getHeader();
-  const footer = doc.getFooter();
-
-  console.log("【DEBUG】取得 Document 區塊狀態：", {
-    hasBody: !!body,
-    hasHeader: !!header,
-    hasFooter: !!footer
-  });
-
-  const sections = [
-    { name: 'Body', obj: body },
-    { name: 'Header', obj: header },
-    { name: 'Footer', obj: footer }
-  ].filter(s => s.obj);
-
   const keys = Object.keys(tokenMap || {});
+  
+  const body = doc.getBody();
+  const parent = body ? body.getParent() : null; // 取得文件根節點
+  
+  if (parent) {
+    for (let i = 0; i < parent.getNumChildren(); i++) {
+      const child = parent.getChild(i);
+      const type = child.getType();
+      
+      let section = null;
+      if (type === DocumentApp.ElementType.HEADER_SECTION) {
+        section = child.asHeaderSection();
+      } else if (type === DocumentApp.ElementType.FOOTER_SECTION) {
+        section = child.asFooterSection();
+      } else if (type === DocumentApp.ElementType.BODY_SECTION) {
+        section = child.asBody();
+      }
 
-  sections.forEach(function(sectionDef) {
-    keys.forEach(function(key) {
-      const pattern = '\\{\\{\\s*' + escapeRegExp_(key) + '\\s*\\}\\}';
-      const found = sectionDef.obj.findText(pattern);
-      console.log(`【DEBUG】在 ${sectionDef.name} 中尋找佔位符 ${key} (Pattern: ${pattern}) -> 找到: ${!!found}`);
-      sectionDef.obj.replaceText(pattern, String(tokenMap[key]));
-    });
-  });
+      if (section) {
+        keys.forEach(function(key) {
+          const pattern = '\\{\\{\\s*' + escapeRegExp_(key) + '\\s*\\}\\}';
+          section.replaceText(pattern, String(tokenMap[key]));
+        });
+      }
+    }
+  }
 }
