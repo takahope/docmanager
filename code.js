@@ -1337,7 +1337,7 @@ function apiGetDocxExportData(tagId) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   
   // 1. Get all documents
-  const docSheet = ss.getSheetByName(ENV.SHEET_DOC);
+  const docSheet = ss.getSheetByName(SHEET_NAMES.DOCS);
   const docData = docSheet.getDataRange().getDisplayValues();
   const allDocs = {};
   for (let i = 1; i < docData.length; i++) {
@@ -1356,7 +1356,7 @@ function apiGetDocxExportData(tagId) {
   }
 
   // 2. Get tags for documents to filter by tagId
-  const docTagSheet = ss.getSheetByName(ENV.SHEET_DOCTAG);
+  const docTagSheet = ss.getSheetByName(SHEET_NAMES.DOC_TAGS);
   const docTagData = docTagSheet.getDataRange().getValues();
   const docsWithTag = new Set();
   for (let i = 1; i < docTagData.length; i++) {
@@ -1368,7 +1368,7 @@ function apiGetDocxExportData(tagId) {
   }
 
   // 3. Get closure relationships
-  const clsSheet = ss.getSheetByName(ENV.SHEET_CLS);
+  const clsSheet = ss.getSheetByName(SHEET_NAMES.CLOSURE);
   const clsData = clsSheet.getDataRange().getValues();
   
   const parentToChildren = {};
