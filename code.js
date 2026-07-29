@@ -1459,8 +1459,89 @@ function apiGetDocxExportData(tagId) {
     throw new Error('無法讀取 Docx 範本檔案，請檢查檔案 ID 或權限。');
   }
 
+  const outputFolderId = _getProp(PROP_KEYS.DOCX_OUTPUT_FOLDER_ID);
+  let recordNo = "";
+  const now = new Date();
+  const tz = Session.getScriptTimeZone();
+  const year = Utilities.formatDate(now, tz, 'yyyy');
+  const month = Utilities.formatDate(now, tz, 'MM');
+  const day = Utilities.formatDate(now, tz, 'dd');
+  const dateKey = Utilities.formatDate(now, tz, 'yyyyMMdd');
+
+  if (outputFolderId) {
+    const prefix = _getProp(PROP_KEYS.RECORD_NUMBER_PREFIX) || 'IS-R-032';
+    recordNo = _createRecordNoFromFolder(outputFolderId, prefix, dateKey);
+  }
+
   return {
     templateBase64: templateBase64,
-    data: flattenedData
+    data: flattenedData,
+    year: year,
+    month: month,
+    day: day,
+    recordNo: recordNo
   };
+}
+
+function _escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function _createRecordNoFromFolder(folderId, prefix, dateKey) {
+  let folder;
+  try {
+    folder = DriveApp.getFolderById(folderId);
+  } catch(e) {
+    throw new Error('找不到輸出資料夾 (DOCX_OUTPUT_FOLDER_ID) 或無權限。');
+  }
+
+  const escapedPrefix = _escapeRegExp(prefix);
+  const pattern = new RegExp('^' + escapedPrefix + '-' + dateKey + '-(\\d+)');
+
+  let maxSerial = 0;
+  const files = folder.getFiles();
+  while (files.hasNext()) {
+    const file = files.next();
+    const name = String(file.getName() || '').trim();
+    const match = name.match(pattern);
+    if (!match) continue;
+
+    const serial = parseInt(match[1], 10);
+    if (!isNaN(serial) && serial > maxSerial) {
+      maxSerial = serial;
+    }
+  }
+
+  const nextSerial = maxSerial + 1;
+  const serialText = nextSerial < 100 ? ('0' + nextSerial).slice(-2) : String(nextSerial);
+  return prefix + '-' + dateKey + '-' + serialText;
+}
+
+function apiSaveDocxToDrive(base64Data, fileName) {
+  const ctx = getUserContext();
+  if (!ctx.isWhitelisted) {
+    throw new Error("無存取權限");
+  }
+
+  const folderId = _getProp(PROP_KEYS.DOCX_OUTPUT_FOLDER_ID);
+  if (!folderId) {
+    throw new Error("系統尚未設定 DOCX_OUTPUT_FOLDER_ID");
+  }
+
+  try {
+    const folder = DriveApp.getFolderById(folderId);
+    const blob = Utilities.newBlob(
+      Utilities.base64Decode(base64Data), 
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 
+      fileName
+    );
+    const newFile = folder.createFile(blob);
+    return {
+      success: true,
+      fileId: newFile.getId(),
+      url: newFile.getUrl()
+    };
+  } catch (err) {
+    throw new Error("存檔失敗：" + err.message);
+  }
 }
