@@ -1455,7 +1455,20 @@ function apiExportNativeDocument(tagId) {
   const prefix = _getProp(PROP_KEYS.RECORD_NUMBER_PREFIX) || 'IS-R-032';
   const recordNo = createRecordNoFromFolder_(outputFolder, prefix, dateKey);
 
-  const newFileName = prefix + '_' + recordNo;
+  // --- 檔名新規格：文件編號_文件名稱_版本_recordNo ---
+  const targetListDocId = 'TWHB-ISMSPIMS-004-003';
+  const targetListDocName = '資訊安全暨個人資料管理文件一覽表';
+  let targetListVersion = '1.0'; // 預設版本
+  
+  // 從文件中尋找該清單文件的實際版本
+  for (let i = 1; i < docData.length; i++) {
+    if (docData[i][DOC_COL.DOC_ID] === targetListDocId) {
+      targetListVersion = docData[i][DOC_COL.VERSION] || targetListVersion;
+      break;
+    }
+  }
+  
+  const newFileName = targetListDocId + '_' + targetListDocName + '_' + targetListVersion + '_' + recordNo;
   const copiedFile = templateFile.makeCopy(newFileName, outputFolder);
   
   const doc = DocumentApp.openById(copiedFile.getId());
