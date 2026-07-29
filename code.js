@@ -1365,28 +1365,40 @@ function apiExportNativeDocument(tagId) {
     }
   }
 
+  const parentToChildren = {};
+  const allChildren = new Set();
+  
+  for (let i = 1; i < closureData.length; i++) {
+    const ancestor = closureData[i][CLS_COL.ANCESTOR_ID];
+    const descendant = closureData[i][CLS_COL.DESCENDANT_ID];
+    const depth = String(closureData[i][CLS_COL.DEPTH]).trim();
+    if (depth === "1" && targetDocIds.has(ancestor) && targetDocIds.has(descendant)) {
+      if (!parentToChildren[ancestor]) {
+        parentToChildren[ancestor] = [];
+      }
+      parentToChildren[ancestor].push(descendant);
+      allChildren.add(descendant);
+    }
+  }
+
   const tableData = [
-    ['文件編號', '文件名稱', '機密等級', '版本', '發行日期', '表單編號', '表單名稱', '表單版本', '表單發行日期']
+    ['文件編號', '文件名稱', '機密等級', '文件版本', '發行日期', '表單編號', '表單名稱', '版本', '發行日期', '備註']
   ];
 
-  for (const parentId of targetDocIds) {
+  const sortedParentIds = Array.from(targetDocIds).sort();
+
+  for (const parentId of sortedParentIds) {
+    if (allChildren.has(parentId)) continue;
     if (!allDocs[parentId]) continue;
     const parentDoc = allDocs[parentId];
-    let childrenIds = [];
     
-    for (let i = 1; i < closureData.length; i++) {
-      if (closureData[i][CLS_COL.ANCESTOR_ID] === parentId && 
-          closureData[i][CLS_COL.DEPTH] === "1" && 
-          closureData[i][CLS_COL.RELATION_TYPE] === 'related' &&
-          visibleDocIds.has(closureData[i][CLS_COL.DESCENDANT_ID])) {
-        childrenIds.push(closureData[i][CLS_COL.DESCENDANT_ID]);
-      }
-    }
+    let childrenIds = parentToChildren[parentId] || [];
+    childrenIds.sort();
 
     if (childrenIds.length === 0) {
       tableData.push([
         parentDoc.doc_id, parentDoc.title, parentDoc.security_level, parentDoc.version, parentDoc.published_at,
-        "", "", "", ""
+        "", "", "", "", ""
       ]);
     } else {
       childrenIds.forEach((childId, index) => {
@@ -1394,12 +1406,12 @@ function apiExportNativeDocument(tagId) {
         if (index === 0) {
           tableData.push([
             parentDoc.doc_id, parentDoc.title, parentDoc.security_level, parentDoc.version, parentDoc.published_at,
-            childDoc.doc_id, childDoc.title, childDoc.version, childDoc.published_at
+            childDoc.doc_id, childDoc.title, childDoc.version, childDoc.published_at, ""
           ]);
         } else {
           tableData.push([
             "", "", "", "", "",
-            childDoc.doc_id, childDoc.title, childDoc.version, childDoc.published_at
+            childDoc.doc_id, childDoc.title, childDoc.version, childDoc.published_at, ""
           ]);
         }
       });
