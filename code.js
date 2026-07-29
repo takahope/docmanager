@@ -1326,3 +1326,141 @@ function apiPreviewUserTags(email) {
     sources: byTag[tagId].sources,
   }));
 }
+
+function apiGetDocxExportData(tagId) {
+  const ctx = getUserContext();
+  const visibleDocIds = _getVisibleDocIds(ctx);
+  
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // 1. Get all documents
+  const docSheet = ss.getSheetByName(ENV.SHEET_DOC);
+  const docData = docSheet.getDataRange().getDisplayValues();
+  const allDocs = {};
+  for (let i = 1; i < docData.length; i++) {
+    const row = docData[i];
+    const docId = row[DOC_COL.DOC_ID];
+    if (visibleDocIds.has(docId)) {
+      allDocs[docId] = {
+        doc_id: docId,
+        title: row[DOC_COL.TITLE],
+        category: row[DOC_COL.CATEGORY],
+        version: row[DOC_COL.VERSION],
+        published_at: row[DOC_COL.PUBLISHED_AT]
+      };
+    }
+  }
+
+  // 2. Get tags for documents to filter by tagId
+  const docTagSheet = ss.getSheetByName(ENV.SHEET_DOCTAG);
+  const docTagData = docTagSheet.getDataRange().getValues();
+  const docsWithTag = new Set();
+  for (let i = 1; i < docTagData.length; i++) {
+    const dId = String(docTagData[i][DOCTAG_COL.DOC_ID]).trim();
+    const tId = String(docTagData[i][DOCTAG_COL.TAG_ID]).trim();
+    if (tId === tagId && allDocs[dId]) {
+      docsWithTag.add(dId);
+    }
+  }
+
+  // 3. Get closure relationships
+  const clsSheet = ss.getSheetByName(ENV.SHEET_CLS);
+  const clsData = clsSheet.getDataRange().getValues();
+  
+  const parentToChildren = {};
+  const allChildren = new Set();
+  
+  for (let i = 1; i < clsData.length; i++) {
+    const row = clsData[i];
+    const ancestor = String(row[CLS_COL.ANCESTOR_ID]).trim();
+    const descendant = String(row[CLS_COL.DESCENDANT_ID]).trim();
+    const depth = parseInt(row[CLS_COL.DEPTH], 10);
+    
+    if (depth === 1 && docsWithTag.has(ancestor) && docsWithTag.has(descendant)) {
+      if (!parentToChildren[ancestor]) {
+        parentToChildren[ancestor] = [];
+      }
+      parentToChildren[ancestor].push(descendant);
+      allChildren.add(descendant);
+    }
+  }
+
+  // 4. Flatten relationships
+  const flattenedData = [];
+  
+  // Sort docsWithTag for stable output if needed, but we'll just iterate
+  // It's better to sort by docId so the table looks organized
+  const sortedDocsWithTag = Array.from(docsWithTag).sort();
+  
+  for (const docId of sortedDocsWithTag) {
+    // If it's a child to another doc in this tag, it shouldn't be treated as a parent
+    if (allChildren.has(docId)) continue;
+    
+    const parentDoc = allDocs[docId];
+    const childrenIds = parentToChildren[docId] || [];
+    // Sort children for stable output
+    childrenIds.sort();
+    
+    if (childrenIds.length === 0) {
+      flattenedData.push({
+        doc_id: parentDoc.doc_id,
+        title: parentDoc.title,
+        category: parentDoc.category,
+        version: parentDoc.version,
+        published_at: parentDoc.published_at,
+        form_id: "",
+        form_title: "",
+        form_version: "",
+        form_published_at: ""
+      });
+    } else {
+      childrenIds.forEach((childId, index) => {
+        const childDoc = allDocs[childId];
+        if (index === 0) {
+          flattenedData.push({
+            doc_id: parentDoc.doc_id,
+            title: parentDoc.title,
+            category: parentDoc.category,
+            version: parentDoc.version,
+            published_at: parentDoc.published_at,
+            form_id: childDoc.doc_id,
+            form_title: childDoc.title,
+            form_version: childDoc.version,
+            form_published_at: childDoc.published_at
+          });
+        } else {
+          flattenedData.push({
+            doc_id: "",
+            title: "",
+            category: "",
+            version: "",
+            published_at: "",
+            form_id: childDoc.doc_id,
+            form_title: childDoc.title,
+            form_version: childDoc.version,
+            form_published_at: childDoc.published_at
+          });
+        }
+      });
+    }
+  }
+
+  // 5. Fetch template from Drive
+  const templateId = _getProp(PROP_KEYS.DOCX_TEMPLATE_FILE_ID);
+  if (!templateId) {
+    throw new Error('系統尚未設定 Docx 範本檔案 (DOCX_TEMPLATE_FILE_ID)。');
+  }
+  
+  let templateBase64 = "";
+  try {
+    const file = DriveApp.getFileById(templateId);
+    templateBase64 = Utilities.base64Encode(file.getBlob().getBytes());
+  } catch (e) {
+    throw new Error('無法讀取 Docx 範本檔案，請檢查檔案 ID 或權限。');
+  }
+
+  return {
+    templateBase64: templateBase64,
+    data: flattenedData
+  };
+}
