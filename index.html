@@ -424,6 +424,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pizzip/3.1.7/pizzip.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pizzip/3.1.7/pizzip-utils.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -477,6 +478,9 @@
           <button class="btn-export" onclick="openDocxExportModal()" style="margin-left: 8px;">⬇ 匯出文件一覽表(Word)</button>
           <button id="btnOpenBatchImport" class="btn btn-outline-primary me-2" style="display:none;" onclick="openBatchImportModal()">
             <i class="fas fa-file-import"></i> 批次匯入檔案
+          </button>
+          <button id="btnOpenBatchMetadata" class="btn btn-outline-primary admin-only" style="display:none;" onclick="openBatchMetadataModal()">
+            <i class="fas fa-table"></i> 批次更新屬性 (Excel)
           </button>
         </div>
         <div class="table-scroll">
@@ -711,6 +715,45 @@
     <div class="modal-body" id="statModalBody"></div>
     <div class="modal-footer">
       <button onclick="closeModal('statModal')">關閉</button>
+    </div>
+  </div>
+  </div>
+</div>
+
+<!-- 批次更新屬性 (Excel) Modal -->
+<div class="modal-backdrop" id="batchMetadataModal">
+  <div class="modal wide" style="width: min(900px, 95vw); max-height: 90vh;">
+    <div class="modal-header">
+      <span id="batchMetadataModalTitle"><i class="fas fa-table me-1"></i> 管理員批次更新屬性 (Excel)</span>
+      <button class="btn-x" onclick="closeBatchMetadataModal()">✕</button>
+    </div>
+    <div class="modal-body" style="overflow-y: auto; max-height: 74vh;">
+      <div class="alert alert-info py-2 mb-3" style="font-size: 13px; background: #e0f2fe; border: 1px solid #bae6fd; padding: 10px; border-radius: 6px;">
+        請上傳 Excel (.xlsx) 檔案。第一列必須包含標題：<code>文件編號</code>、<code>機密等級</code>、<code>發行日期</code>。
+      </div>
+      <div class="mb-3">
+        <input class="form-control" type="file" id="batchMetadataFileInput" accept=".xlsx, .xls" onchange="parseBatchMetadataExcel(this.files)">
+      </div>
+      
+      <div class="table-scroll" style="max-height: 400px; border: 1px solid var(--border);">
+        <table id="batchMetadataTable">
+          <thead>
+            <tr>
+              <th>狀態</th>
+              <th>文件編號</th>
+              <th>機密等級 (新)</th>
+              <th>發行日期 (新)</th>
+            </tr>
+          </thead>
+          <tbody id="batchMetadataPreviewTbody">
+            <tr><td colspan="4" class="text-center text-muted" style="padding: 20px;">請選擇檔案以產生預覽...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-footer" style="padding: 12px 24px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px;">
+      <button class="btn" style="background:#fff; border:1px solid #d1d5db;" onclick="closeBatchMetadataModal()">取消</button>
+      <button class="btn btn-primary" id="btnExecuteBatchMetadata" onclick="executeBatchMetadataUpdate()" disabled>確認並開始執行匯入</button>
     </div>
   </div>
 </div>
@@ -1071,6 +1114,11 @@ function renderUserInfo() {
   const btnBatchImport = document.getElementById('btnOpenBatchImport');
   if (btnBatchImport) {
     btnBatchImport.style.display = (currentUser && currentUser.isAdmin && isAdminView) ? 'inline-block' : 'none';
+  }
+  
+  const btnBatchMetadata = document.getElementById('btnOpenBatchMetadata');
+  if (btnBatchMetadata) {
+    btnBatchMetadata.style.display = (currentUser && currentUser.isAdmin && isAdminView) ? 'inline-block' : 'none';
   }
 }
 
@@ -2018,6 +2066,174 @@ async function startBatchImportExecution() {
   if (typeof renderTable === 'function') renderTable();
   if (typeof renderDashboard === 'function') renderDashboard();
   if (typeof reloadDocs === 'function') reloadDocs();
+}
+
+}
+
+// ============================================================
+// 批次更新屬性 (Excel)
+// ============================================================
+let batchMetadataItems = [];
+
+function openBatchMetadataModal() {
+  if (!currentUser || !currentUser.isAdmin) {
+    showToast('僅限管理員執行此操作');
+    return;
+  }
+  batchMetadataItems = [];
+  const fileInput = document.getElementById('batchMetadataFileInput');
+  if (fileInput) fileInput.value = '';
+  document.getElementById('btnExecuteBatchMetadata').disabled = true;
+  document.getElementById('batchMetadataPreviewTbody').innerHTML = '<tr><td colspan="4" class="text-center text-muted" style="padding: 20px;">請選擇檔案以產生預覽...</td></tr>';
+  document.getElementById('batchMetadataModal').classList.add('show');
+}
+
+function closeBatchMetadataModal() {
+  document.getElementById('batchMetadataModal').classList.remove('show');
+}
+
+// 標準化日期 (支援民國年與西元年)
+function _normalizeDate(rawDate) {
+  if (!rawDate) return '';
+  let s = String(rawDate).trim().replace(/-/g, '/');
+  const parts = s.split('/');
+  if (parts.length === 3) {
+    let y = parseInt(parts[0], 10);
+    let m = parseInt(parts[1], 10);
+    let d = parseInt(parts[2], 10);
+    if (isNaN(y) || isNaN(m) || isNaN(d)) return s; 
+    
+    if (y < 1000) y += 1911; // 民國年
+    
+    const mm = m < 10 ? '0' + m : m;
+    const dd = d < 10 ? '0' + d : d;
+    return `${y}/${mm}/${dd}`;
+  }
+  return s;
+}
+
+function parseBatchMetadataExcel(files) {
+  if (!files || files.length === 0) return;
+  const file = files[0];
+  const reader = new FileReader();
+  
+  showLoading(true);
+  reader.onload = function(e) {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, {type: 'array'});
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      
+      const json = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false });
+      
+      batchMetadataItems = [];
+      const docs = allDocs || [];
+      
+      json.forEach((row, idx) => {
+        const docId = String(row['文件編號'] || '').trim();
+        if (!docId) return;
+        
+        const secLevel = String(row['機密等級'] || '').trim();
+        const rawDate = row['發行日期'] || '';
+        const normDate = _normalizeDate(rawDate);
+        
+        const matchedDoc = docs.find(d => d.doc_id === docId);
+        let status = 'matched';
+        let statusText = '✔ 可更新';
+        let badgeClass = 'bg-success';
+        
+        if (!matchedDoc) {
+          status = 'unmatched';
+          statusText = '❌ 找不到文件';
+          badgeClass = 'bg-danger';
+        }
+        
+        batchMetadataItems.push({
+          doc_id: docId,
+          security_level: secLevel,
+          published_at: normDate,
+          status: status,
+          statusText: statusText,
+          badgeClass: badgeClass,
+          selected: (status === 'matched')
+        });
+      });
+      
+      renderBatchMetadataPreviewTable();
+    } catch (err) {
+      showToast('解析 Excel 失敗：' + err.message);
+    } finally {
+      showLoading(false);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function renderBatchMetadataPreviewTable() {
+  const tbody = document.getElementById('batchMetadataPreviewTbody');
+  const btnStart = document.getElementById('btnExecuteBatchMetadata');
+  if (!tbody) return;
+
+  if (batchMetadataItems.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted" style="padding: 20px;">無有效資料</td></tr>`;
+    btnStart.disabled = true;
+    return;
+  }
+
+  let html = '';
+  let selectableCount = 0;
+
+  batchMetadataItems.forEach((item, idx) => {
+    if (item.selected) selectableCount++;
+    const badgeStyle = item.badgeClass === 'bg-success' ? 'background:#10b981;color:#fff;padding:2px 6px;border-radius:4px;font-size:12px;' : 'background:#ef4444;color:#fff;padding:2px 6px;border-radius:4px;font-size:12px;';
+    html += `
+      <tr>
+        <td><span style="${badgeStyle}">${item.statusText}</span></td>
+        <td>${escapeHtml(item.doc_id)}</td>
+        <td>${escapeHtml(item.security_level)}</td>
+        <td>${escapeHtml(item.published_at)}</td>
+      </tr>
+    `;
+  });
+
+  tbody.innerHTML = html;
+  btnStart.disabled = (selectableCount === 0);
+}
+
+function executeBatchMetadataUpdate() {
+  const updateList = batchMetadataItems
+    .filter(item => item.selected)
+    .map(item => ({
+      doc_id: item.doc_id,
+      security_level: item.security_level,
+      published_at: item.published_at
+    }));
+    
+  if (updateList.length === 0) {
+    showToast('沒有可更新的項目');
+    return;
+  }
+  
+  if (!confirm(`確定要更新 ${updateList.length} 筆資料嗎？`)) return;
+  
+  showLoading(true);
+  google.script.run
+    .withSuccessHandler(res => {
+      showLoading(false);
+      if (!res.success) {
+        showToast('匯入失敗：' + res.error);
+        return;
+      }
+      alert(`成功更新 ${res.updatedCount} 筆資料`);
+      closeBatchMetadataModal();
+      init(); 
+    })
+    .withFailureHandler(err => {
+      showLoading(false);
+      showToast('系統錯誤：' + err.message);
+    })
+    .apiBatchUpdateMetadata(updateList);
 }
 
 function reviewCell(d) {
