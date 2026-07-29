@@ -826,6 +826,7 @@
 let allDocs = [];
 let statuses = [];
 let categories = [];
+let securityLevels = [];
 let relationTypes = [];
 let reviewCycles = [];
 let statusTransitions = {};
@@ -1000,6 +1001,7 @@ window.addEventListener('DOMContentLoaded', () => {
       allDocs = data.docs;
       statuses = data.statuses;
       categories = data.categories;
+      securityLevels = data.securityLevels || [];
       relationTypes = data.relationTypes;
       reviewCycles = data.reviewCycles || [6, 12, 24, 36];
       statusTransitions = data.statusTransitions || {};
