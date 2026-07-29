@@ -2068,8 +2068,6 @@ async function startBatchImportExecution() {
   if (typeof reloadDocs === 'function') reloadDocs();
 }
 
-}
-
 // ============================================================
 // 批次更新屬性 (Excel)
 // ============================================================
@@ -2103,7 +2101,12 @@ function _normalizeDate(rawDate) {
     let d = parseInt(parts[2], 10);
     if (isNaN(y) || isNaN(m) || isNaN(d)) return s; 
     
-    if (y < 1000) y += 1911; // 民國年
+    // 防護機制：如果是 2 位數的西元年(例如 SheetJS 解析 24/02/01 會得到 24)
+    if (y < 50) {
+      y += 2000;
+    } else if (y < 1000) {
+      y += 1911; // 民國年
+    }
     
     const mm = m < 10 ? '0' + m : m;
     const dd = d < 10 ? '0' + d : d;

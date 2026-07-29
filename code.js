@@ -1577,15 +1577,18 @@ function apiBatchUpdateMetadata(updateList) {
       const rowIndex = docRowMap.get(item.doc_id);
       if (rowIndex !== undefined) {
         // 更新記憶體中的 rows 陣列
-        if (item.security_level !== undefined && item.security_level !== '') {
-          rows[rowIndex][DOC_COL.SECURITY_LEVEL] = item.security_level;
+        if (item.security_level !== undefined) {
+          // 允許清空或為合法值
+          if (item.security_level === '' || SECURITY_LEVELS.includes(item.security_level)) {
+            rows[rowIndex][DOC_COL.SECURITY_LEVEL] = item.security_level;
+          }
         }
-        if (item.published_at !== undefined && item.published_at !== '') {
+        if (item.published_at !== undefined) {
           rows[rowIndex][DOC_COL.PUBLISHED_AT] = item.published_at;
         }
         
         // 寫入異動紀錄
-        _logAudit(item.doc_id, rows[rowIndex][DOC_COL.VERSION], '批次更新屬性', `更新由 Excel 匯入`);
+        _logAudit('批次更新屬性', item.doc_id, rows[rowIndex][DOC_COL.VERSION], `更新由 Excel 匯入`);
         updatedCount++;
       }
     }
