@@ -1471,12 +1471,21 @@ function apiExportNativeDocument(tagId) {
   // 輔助函數：安全地設定儲存格文字，保留段落對齊格式
   function setCellTextSafe_(cell, text) {
     if (cell.getNumChildren() > 0 && cell.getChild(0).getType() === DocumentApp.ElementType.PARAGRAPH) {
-      cell.getChild(0).asParagraph().setText(text);
+      const p = cell.getChild(0).asParagraph();
+      if (text === '') {
+        p.clear();
+      } else {
+        p.setText(text);
+      }
       while (cell.getNumChildren() > 1) {
         cell.removeChild(cell.getChild(1));
       }
     } else {
-      cell.setText(text);
+      if (text === '') {
+        cell.clear();
+      } else {
+        cell.setText(text);
+      }
     }
   }
 
