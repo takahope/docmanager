@@ -78,7 +78,8 @@ function _deployDocSheet(ss) {
     'doc_id', 'title', 'category', 'status',
     'owner', 'updated_at', 'version', 'google_drive_location',
     'owner_email', 'published_at', 'next_review_date', 'review_cycle_months',
-    'file_id', 'pending_file_id', 'pending_version', 'pending_file_name'
+    'file_id', 'pending_file_id', 'pending_version', 'pending_file_name',
+    'security_level'
   ];
 
   // 寫入 Header（第一列）
@@ -93,7 +94,7 @@ function _deployDocSheet(ss) {
   sheet.getRange('A:A').setNumberFormat('@');
 
   // 欄寬設定
-  const colWidths = [120, 240, 100, 80, 100, 120, 80, 280, 200, 110, 130, 90, 160, 160, 90, 200];
+  const colWidths = [120, 240, 100, 80, 100, 120, 80, 280, 200, 110, 130, 90, 160, 160, 90, 200, 100];
   colWidths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
 
   // 資料驗證：status 下拉
@@ -155,6 +156,13 @@ function _applyDocSheetFormats(sheet) {
     .setAllowInvalid(true) // 允許空值（未發布文件可不填）
     .build();
   sheet.getRange('L2:L1000').setDataValidation(cycleRule);
+
+  // 資料驗證：security_level (Q) 下拉
+  const secRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(SECURITY_LEVELS, true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange('Q2:Q1000').setDataValidation(secRule);
 }
 
 // ── V4 → V5 遷移：移除 owner_ID 欄位 ─────────────────────────
@@ -419,6 +427,51 @@ function migrateV7() {
 
   SpreadsheetApp.flush();
   Logger.log(`✅ migrateV7 完成（檔案版本管理；中央資料夾 ID：${folderId}）`);
+}
+
+// ── V7 → V8 遷移：文件清單補 Q 欄 (security_level) ───────────
+function migrateV8() {
+  const ss = SpreadsheetApp.openById(ENV.SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_NAMES.DOCS);
+  if (!sheet) throw new Error(`找不到工作表：${SHEET_NAMES.DOCS}`);
+
+  const col = DOC_COL.SECURITY_LEVEL + 1;
+  const cell = sheet.getRange(1, col);
+  if (cell.getValue() !== 'security_level') {
+    cell.setValue('security_level')
+        .setFontWeight('bold')
+        .setBackground('#1a3a5c')
+        .setFontColor('#ffffff');
+    sheet.setColumnWidth(col, 100);
+    Logger.log(`✅ 補上欄位：security_level`);
+  }
+
+  // 套用驗證與格式
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(SECURITY_LEVELS, true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, col, Math.max(sheet.getMaxRows(), 1000)).setDataValidation(rule);
+
+  // 補齊舊資料預設值為 '一般'
+  const lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    const range = sheet.getRange(2, col, lastRow - 1, 1);
+    const values = range.getValues();
+    let modified = false;
+    for (let i = 0; i < values.length; i++) {
+      if (!values[i][0]) {
+        values[i][0] = '一般';
+        modified = true;
+      }
+    }
+    if (modified) {
+      range.setValues(values);
+      Logger.log('✅ 舊資料已補上預設機密等級「一般」');
+    }
+  }
+  SpreadsheetApp.flush();
+  Logger.log('✅ migrateV8 完成（新增機密等級）');
 }
 
 // ── V6 選用工具：搬移既有手動貼的 Drive 連結進中央資料夾 ─────

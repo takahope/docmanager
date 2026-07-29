@@ -91,8 +91,12 @@ const DOC_COL = {
   PENDING_FILE_ID:     13,  // N: pending_file_id（V6：待核版檔案 ID，核准發布時 promote）
   PENDING_VERSION:     14,  // O: pending_version（V6：待核版版號）
   PENDING_FILE_NAME:   15,  // P: pending_file_name（V6：待核版原始檔名）
+  SECURITY_LEVEL:      16,  // Q: security_level（V8：機密等級）
 };
-const DOC_COL_COUNT = 16;   // 文件清單總欄數（appendRow / setValues 用）
+const DOC_COL_COUNT = 17;   // 文件清單總欄數（appendRow / setValues 用）
+
+// ── 機密等級選項（V8） ──────────────────────────────────────────────
+const SECURITY_LEVELS = ['一般', '限閱', '密', '機密'];
 
 // ── 異動紀錄欄位索引（0-based）───────────────────────────────
 const AUDIT_COL = {
