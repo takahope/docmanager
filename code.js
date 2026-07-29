@@ -1552,3 +1552,54 @@ function apiSaveDocxToDrive(base64Data, fileName) {
     throw new Error("存檔失敗：" + err.message);
   }
 }
+
+// 批次更新文件屬性 (機密等級與發行日期)
+function apiBatchUpdateMetadata(updateList) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const ctx = _assertAdmin(); // 僅限管理員
+    if (!updateList || !updateList.length) return { success: true, updatedCount: 0 };
+
+    const sheet = _getSheet(SHEET_NAMES.DOCS);
+    const rows = sheet.getDataRange().getDisplayValues();
+    
+    // 建立 doc_id 對應 row index 的 Map (跳過表頭)
+    const docRowMap = new Map();
+    for (let i = 1; i < rows.length; i++) {
+      const dId = String(rows[i][DOC_COL.DOC_ID]).trim();
+      if (dId) docRowMap.set(dId, i);
+    }
+
+    let updatedCount = 0;
+    // 走訪並更新
+    for (const item of updateList) {
+      const rowIndex = docRowMap.get(item.doc_id);
+      if (rowIndex !== undefined) {
+        // 更新記憶體中的 rows 陣列
+        if (item.security_level !== undefined && item.security_level !== '') {
+          rows[rowIndex][DOC_COL.SECURITY_LEVEL] = item.security_level;
+        }
+        if (item.published_at !== undefined && item.published_at !== '') {
+          rows[rowIndex][DOC_COL.PUBLISHED_AT] = item.published_at;
+        }
+        
+        // 寫入異動紀錄
+        _logAudit(item.doc_id, rows[rowIndex][DOC_COL.VERSION], '批次更新屬性', `更新由 Excel 匯入`);
+        updatedCount++;
+      }
+    }
+
+    if (updatedCount > 0) {
+      // 一次性寫回所有資料
+      sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+      SpreadsheetApp.flush();
+    }
+
+    return { success: true, updatedCount: updatedCount };
+  } catch (e) {
+    return { success: false, error: String(e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
