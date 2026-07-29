@@ -1494,7 +1494,14 @@ function apiExportNativeDocument(tagId) {
     const f = body.findText(placeholderText);
     if (!f) return;
     let el = f.getElement();
-    while (el.getType() !== DocumentApp.ElementType.TABLE_ROW) { el = el.getParent(); }
+    while (el && el.getType() !== DocumentApp.ElementType.TABLE_ROW) { 
+      el = el.getParent(); 
+    }
+    if (!el) {
+      // 如果佔位符不在表格中，直接清空該佔位符並返回，避免程式崩潰
+      f.getElement().asText().setText('');
+      return;
+    }
     const templateRow = el.asTableRow();
     const table = templateRow.getParent().asTable();
 
@@ -1533,48 +1540,58 @@ function apiExportNativeDocument(tagId) {
     const fRow = body.findText('\\{\\{ROW_OTHER\\}\\}');
     if (fHeader && fRow) {
       let elH = fHeader.getElement();
-      while (elH.getType() !== DocumentApp.ElementType.TABLE_ROW) { elH = elH.getParent(); }
-      const headerRowTemp = elH.asTableRow();
+      while (elH && elH.getType() !== DocumentApp.ElementType.TABLE_ROW) { elH = elH.getParent(); }
       
       let elR = fRow.getElement();
-      while (elR.getType() !== DocumentApp.ElementType.TABLE_ROW) { elR = elR.getParent(); }
-      const rowTemp = elR.asTableRow();
+      while (elR && elR.getType() !== DocumentApp.ElementType.TABLE_ROW) { elR = elR.getParent(); }
 
-      const table = rowTemp.getParent().asTable();
-      let insertIndex = table.getChildIndex(rowTemp) + 1;
+      if (!elH || !elR) {
+        if (fHeader) fHeader.getElement().asText().setText('');
+        if (fRow) fRow.getElement().asText().setText('');
+      } else {
+        const headerRowTemp = elH.asTableRow();
+        const rowTemp = elR.asTableRow();
 
-      const catKeys = Object.keys(group_Other).sort();
-      catKeys.forEach(cat => {
-        const dataRows = group_Other[cat];
-        // 插入動態標頭
-        const newHeader = table.insertTableRow(insertIndex++);
-        for (let c = 0; c < headerRowTemp.getNumCells(); c++) {
-          const hc = headerRowTemp.getCell(c).copy();
-          if (c === 0) setCellTextSafe_(hc, cat);
-          newHeader.appendTableCell(hc);
-        }
-        
-        // 插入資料
-        dataRows.forEach(rowData => {
-          const newRow = table.insertTableRow(insertIndex++);
-          for (let c = 0; c < rowTemp.getNumCells(); c++) {
-            const newCell = rowTemp.getCell(c).copy();
-            if (c < rowData.length) {
-              setCellTextSafe_(newCell, String(rowData[c]));
-            }
-            newRow.appendTableCell(newCell);
+        const table = rowTemp.getParent().asTable();
+        let insertIndex = table.getChildIndex(rowTemp) + 1;
+
+        const catKeys = Object.keys(group_Other).sort();
+        catKeys.forEach(cat => {
+          const dataRows = group_Other[cat];
+          // 插入動態標頭
+          const newHeader = table.insertTableRow(insertIndex++);
+          for (let c = 0; c < headerRowTemp.getNumCells(); c++) {
+            const hc = headerRowTemp.getCell(c).copy();
+            if (c === 0) setCellTextSafe_(hc, cat);
+            newHeader.appendTableCell(hc);
           }
+          
+          // 插入資料
+          dataRows.forEach(rowData => {
+            const newRow = table.insertTableRow(insertIndex++);
+            for (let c = 0; c < rowTemp.getNumCells(); c++) {
+              const newCell = rowTemp.getCell(c).copy();
+              if (c < rowData.length) {
+                setCellTextSafe_(newCell, String(rowData[c]));
+              }
+              newRow.appendTableCell(newCell);
+            }
+          });
         });
-      });
 
-      // 刪除動態範本列
-      rowTemp.removeFromParent();
-      headerRowTemp.removeFromParent();
+        // 刪除動態範本列
+        rowTemp.removeFromParent();
+        headerRowTemp.removeFromParent();
+      }
     } else if (fRow) {
       // 容錯：找不到 header 但有 row 佔位符時將其清除
       let elR = fRow.getElement();
-      while (elR.getType() !== DocumentApp.ElementType.TABLE_ROW) { elR = elR.getParent(); }
-      elR.asTableRow().removeFromParent();
+      while (elR && elR.getType() !== DocumentApp.ElementType.TABLE_ROW) { elR = elR.getParent(); }
+      if (elR) {
+        elR.asTableRow().removeFromParent();
+      } else {
+        fRow.getElement().asText().setText('');
+      }
     }
   }
 
