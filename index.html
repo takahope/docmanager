@@ -484,7 +484,7 @@
             <thead>
               <tr>
                 <th class="approve-col"></th>
-                <th>文件編號</th><th>標題</th><th>類別</th><th>狀態</th><th>負責人</th><th>版本</th><th>下次審查</th>
+                <th>文件編號</th><th>標題</th><th>類別</th><th>機密等級</th><th>狀態</th><th>負責人</th><th>版本</th><th>下次審查</th>
               </tr>
             </thead>
             <tbody id="docTableBody"></tbody>
@@ -635,6 +635,7 @@
       <div class="form-group"><label>標題 *</label><input id="f_title" required></div>
       <div class="form-row">
         <div class="form-group"><label>類別</label><select id="f_category"></select></div>
+        <div class="form-group"><label>機密等級</label><select id="f_security_level"></select></div>
         <div class="form-group"><label>狀態</label><select id="f_status"></select>
           <div class="field-hint" id="statusHint"></div>
         </div>
@@ -1489,6 +1490,7 @@ function renderTable() {
         <td class="doc-id">${escapeHtml(d.doc_id)}</td>
         <td>${escapeHtml(d.title)}</td>
         <td>${escapeHtml(d.category)}</td>
+        <td>${escapeHtml(d.security_level)}</td>
         <td>${statusBadge(d.status)}</td>
         <td>${escapeHtml(d.owner)}</td>
         <td>${escapeHtml(d.version)}</td>
@@ -2175,6 +2177,7 @@ function renderDetail(docId, descendants, ancestors, history, fileVersions) {
 
     <dl class="detail-meta">
       <dt>類別</dt><dd>${escapeHtml(doc.category)}</dd>
+      <dt>機密等級</dt><dd>${escapeHtml(doc.security_level)}</dd>
       <dt>狀態</dt><dd>${statusBadge(doc.status)}</dd>
       <dt>負責人</dt><dd>${escapeHtml(doc.owner)}${doc.owner_email ? '<br>' + escapeHtml(doc.owner_email) : ''}</dd>
       <dt>版本</dt><dd>${escapeHtml(doc.version)}</dd>
@@ -2377,6 +2380,10 @@ function openDocModal(docId) {
   const catSel = document.getElementById('f_category');
   catSel.innerHTML = categories.map(c => `<option>${escapeHtml(c)}</option>`).join('');
 
+  // 機密等級下拉
+  const secSel = document.getElementById('f_security_level');
+  secSel.innerHTML = securityLevels.map(c => `<option>${escapeHtml(c)}</option>`).join('');
+
   // 狀態下拉：只列「目前狀態＋允許的流轉目標」（後端另有查表驗證）
   const stSel = document.getElementById('f_status');
   const hint = document.getElementById('statusHint');
@@ -2414,6 +2421,7 @@ function openDocModal(docId) {
   if (isEdit) {
     document.getElementById('f_title').value = doc.title;
     catSel.value = doc.category;
+    secSel.value = doc.security_level;
     stSel.value = doc.status;
     document.getElementById('f_owner').value = doc.owner;
     document.getElementById('f_owner_email').value = doc.owner_email || '';
@@ -2426,6 +2434,7 @@ function openDocModal(docId) {
     document.getElementById('f_owner_email').value = currentUser.email || '';
     document.getElementById('f_version').value = '0.1';
     stSel.value = '草稿';
+    secSel.value = '一般';
     cycleSel.value = '12';
     ownerSel.value = (currentUser.email || '').toLowerCase();
   }
@@ -2446,6 +2455,7 @@ function saveDoc() {
     doc_id: docId,
     title: document.getElementById('f_title').value.trim(),
     category: document.getElementById('f_category').value,
+    security_level: document.getElementById('f_security_level').value,
     status: document.getElementById('f_status').value,
     owner: document.getElementById('f_owner').value.trim(),
     owner_email: document.getElementById('f_owner_email').value.trim(),

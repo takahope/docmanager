@@ -1348,6 +1348,7 @@ function apiGetDocxExportData(tagId) {
         doc_id: docId,
         title: row[DOC_COL.TITLE],
         category: row[DOC_COL.CATEGORY],
+        security_level: row[DOC_COL.SECURITY_LEVEL] || '一般',
         version: row[DOC_COL.VERSION],
         published_at: row[DOC_COL.PUBLISHED_AT]
       };
@@ -1409,6 +1410,7 @@ function apiGetDocxExportData(tagId) {
         doc_id: parentDoc.doc_id,
         title: parentDoc.title,
         category: parentDoc.category,
+        security_level: parentDoc.security_level,
         version: parentDoc.version,
         published_at: parentDoc.published_at,
         form_id: "",
@@ -1424,6 +1426,7 @@ function apiGetDocxExportData(tagId) {
             doc_id: parentDoc.doc_id,
             title: parentDoc.title,
             category: parentDoc.category,
+            security_level: parentDoc.security_level,
             version: parentDoc.version,
             published_at: parentDoc.published_at,
             form_id: childDoc.doc_id,
@@ -1436,6 +1439,7 @@ function apiGetDocxExportData(tagId) {
             doc_id: "",
             title: "",
             category: "",
+            security_level: "",
             version: "",
             published_at: "",
             form_id: childDoc.doc_id,
